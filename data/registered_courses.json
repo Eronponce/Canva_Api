@@ -1,0 +1,60 @@
+[
+  {
+    "course_ref": "33960",
+    "created_at": "2026-04-02T20:09:10Z"
+  },
+  {
+    "course_ref": "33923",
+    "created_at": "2026-04-02T20:09:14Z"
+  },
+  {
+    "course_ref": "34049",
+    "created_at": "2026-04-02T20:09:17Z"
+  },
+  {
+    "course_ref": "34027",
+    "created_at": "2026-04-02T20:09:21Z"
+  },
+  {
+    "course_ref": "33956",
+    "created_at": "2026-04-02T20:09:23Z"
+  },
+  {
+    "course_ref": "34052",
+    "created_at": "2026-04-02T20:09:30Z"
+  },
+  {
+    "course_ref": "34053",
+    "created_at": "2026-04-02T20:09:35Z"
+  },
+  {
+    "course_ref": "33860",
+    "canvas_course_id": 33860,
+    "course_name": "INTRODUCAO AO PYTHON",
+    "course_code": "CIA@2009",
+    "term_name": "Periodo: 20254.GRAD-EAD.6",
+    "workflow_state": "available",
+    "created_at": "2026-04-02T20:35:20Z",
+    "updated_at": "2026-04-02T20:35:20Z"
+  },
+  {
+    "course_ref": "33867",
+    "canvas_course_id": 33867,
+    "course_name": "EMPREENDEDORISMO",
+    "course_code": "EMPGN@002",
+    "term_name": "Periodo: 20261.GRAD-EAD.6",
+    "workflow_state": "available",
+    "created_at": "2026-04-02T20:35:33Z",
+    "updated_at": "2026-04-02T20:35:33Z"
+  },
+  {
+    "course_ref": "33912",
+    "canvas_course_id": 33912,
+    "course_name": "GERENCIAMENTO DE PROJETOS",
+    "course_code": "GPR@001",
+    "term_name": "Periodo: 20261.GRAD-EAD.6",
+    "workflow_state": "available",
+    "created_at": "2026-04-02T20:36:22Z",
+    "updated_at": "2026-04-02T20:36:22Z"
+  }
+]

@@ -1,0 +1,2 @@
+﻿course_ref,course_id,course_name,status,announcement_id,announcement_url,published,delayed_post_at,dry_run,error
+33860,,,error,,,False,,False,Canvas respondeu com status 400 para POST https://unifil.test.instructure.com/api/v1/courses/33860/discussion_topics

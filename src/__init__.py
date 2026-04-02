@@ -1,0 +1,1 @@
+"""Canvas bulk panel package."""

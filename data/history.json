@@ -1,0 +1,660 @@
+[
+  {
+    "id": "7a69e6450b9f",
+    "kind": "message",
+    "title": "Olá Aluno!",
+    "status": "completed",
+    "created_at": "2026-04-02T20:50:38Z",
+    "updated_at": "2026-04-02T20:51:13Z",
+    "finished_at": "2026-04-02T20:51:13Z",
+    "progress": {
+      "current": 2,
+      "total": 2,
+      "percent": 100,
+      "step": "Concluído"
+    },
+    "summary": {
+      "course_refs": [
+        "33860"
+      ],
+      "group_ids": [],
+      "select_all_groups": false
+    },
+    "result": {
+      "summary": {
+        "requested_at": "2026-04-02T20:51:13Z",
+        "requested_by": {
+          "id": 32006,
+          "name": "ERON PONCE PEREIRA"
+        },
+        "requested_strategy": "users",
+        "effective_strategy": "users",
+        "dry_run": false,
+        "dedupe": true,
+        "total_courses": 1,
+        "total_students_found": 35,
+        "total_recipients_targeted": 35,
+        "total_recipients_sent": 35,
+        "total_duplicates_skipped": 0,
+        "success_count": 1,
+        "partial_count": 0,
+        "failure_count": 0,
+        "skipped_count": 0
+      },
+      "course_results": [
+        {
+          "course_ref": "33860",
+          "course_id": 33860,
+          "course_name": "INTRODUCAO AO PYTHON",
+          "strategy_requested": "users",
+          "strategy_used": "users",
+          "students_found": 35,
+          "duplicates_skipped": 0,
+          "recipients_targeted": 35,
+          "recipients_sent": 35,
+          "batch_count": 1,
+          "status": "success",
+          "conversation_ids": [
+            1294313,
+            1294312,
+            1294311,
+            1294310,
+            1294309,
+            1294308,
+            1294307,
+            1294306,
+            1294305,
+            1294304,
+            1294303,
+            1294302,
+            1294301,
+            1294300,
+            1294299,
+            1294298,
+            1294297,
+            1294296,
+            1294295,
+            1294294,
+            1294293,
+            1294292,
+            1294291,
+            1294290,
+            1294289,
+            1294288,
+            1294287,
+            1294286,
+            1294285,
+            1294284,
+            1294283,
+            1294282,
+            1294281,
+            1294280,
+            1294279
+          ],
+          "error": null,
+          "dry_run": false,
+          "messageable_context": true
+        }
+      ]
+    },
+    "error": null,
+    "logs": [
+      {
+        "timestamp": "2026-04-02T20:50:50Z",
+        "level": "INFO",
+        "message": "Conexão validada para o envio de mensagens.",
+        "data": {
+          "user_id": 32006,
+          "user_name": "ERON PONCE PEREIRA"
+        }
+      },
+      {
+        "timestamp": "2026-04-02T20:51:02Z",
+        "level": "INFO",
+        "message": "Turma carregada para envio.",
+        "data": {
+          "course_id": 33860,
+          "course_name": "INTRODUCAO AO PYTHON",
+          "students_found": 35,
+          "messageable_context": true
+        }
+      },
+      {
+        "timestamp": "2026-04-02T20:51:13Z",
+        "level": "INFO",
+        "message": "Envio por usuário concluído para a turma.",
+        "data": {
+          "course_id": 33860,
+          "recipients_sent": 35,
+          "batch_count": 1,
+          "status": "success"
+        }
+      }
+    ],
+    "report_filename": "message-report-7a69e6450b9f.csv"
+  },
+  {
+    "id": "45117d2fc7f9",
+    "kind": "announcement",
+    "title": "ritutlo",
+    "status": "completed",
+    "created_at": "2026-04-02T20:47:02Z",
+    "updated_at": "2026-04-02T20:47:07Z",
+    "finished_at": "2026-04-02T20:47:07Z",
+    "progress": {
+      "current": 1,
+      "total": 1,
+      "percent": 100,
+      "step": "Concluído"
+    },
+    "summary": {
+      "course_refs": [
+        "33912"
+      ],
+      "group_ids": [],
+      "select_all_groups": false
+    },
+    "result": {
+      "summary": {
+        "requested_at": "2026-04-02T20:47:07Z",
+        "requested_by": {
+          "id": 32006,
+          "name": "ERON PONCE PEREIRA"
+        },
+        "courses_processed": 1,
+        "success_count": 1,
+        "failure_count": 0,
+        "dry_run": false,
+        "publish_mode": "publish_now",
+        "lock_comment": false
+      },
+      "course_results": [
+        {
+          "course_ref": "33912",
+          "course_id": 33912,
+          "course_name": "GERENCIAMENTO DE PROJETOS",
+          "status": "success",
+          "announcement_id": 123470,
+          "announcement_url": "https://unifil.test.instructure.com/courses/33912/discussion_topics/123470",
+          "published": true,
+          "delayed_post_at": null,
+          "dry_run": false,
+          "error": null
+        }
+      ]
+    },
+    "error": null,
+    "logs": [
+      {
+        "timestamp": "2026-04-02T20:47:03Z",
+        "level": "INFO",
+        "message": "Conexão validada com sucesso.",
+        "data": {
+          "user_id": 32006,
+          "user_name": "ERON PONCE PEREIRA"
+        }
+      },
+      {
+        "timestamp": "2026-04-02T20:47:03Z",
+        "level": "INFO",
+        "message": "Iniciando processamento da turma.",
+        "data": {
+          "course_ref": "33912"
+        }
+      },
+      {
+        "timestamp": "2026-04-02T20:47:07Z",
+        "level": "INFO",
+        "message": "Comunicado criado com sucesso.",
+        "data": {
+          "course_id": 33912,
+          "announcement_id": 123470
+        }
+      }
+    ],
+    "report_filename": "announcement-report-45117d2fc7f9.csv"
+  },
+  {
+    "id": "bdf69b45bcce",
+    "kind": "announcement",
+    "title": "teste8",
+    "status": "completed",
+    "created_at": "2026-04-02T20:43:08Z",
+    "updated_at": "2026-04-02T20:43:10Z",
+    "finished_at": "2026-04-02T20:43:10Z",
+    "progress": {
+      "current": 1,
+      "total": 1,
+      "percent": 100,
+      "step": "Concluído"
+    },
+    "summary": {
+      "course_refs": [
+        "33860"
+      ],
+      "group_ids": [],
+      "select_all_groups": false
+    },
+    "result": {
+      "summary": {
+        "requested_at": "2026-04-02T20:43:10Z",
+        "requested_by": {
+          "id": 32006,
+          "name": "ERON PONCE PEREIRA"
+        },
+        "courses_processed": 1,
+        "success_count": 0,
+        "failure_count": 1,
+        "dry_run": false,
+        "publish_mode": "draft",
+        "lock_comment": false
+      },
+      "course_results": [
+        {
+          "course_ref": "33860",
+          "course_id": null,
+          "course_name": null,
+          "status": "error",
+          "announcement_id": null,
+          "announcement_url": null,
+          "published": false,
+          "delayed_post_at": null,
+          "dry_run": false,
+          "error": "Canvas respondeu com status 400 para POST https://unifil.test.instructure.com/api/v1/courses/33860/discussion_topics"
+        }
+      ]
+    },
+    "error": null,
+    "logs": [
+      {
+        "timestamp": "2026-04-02T20:43:09Z",
+        "level": "INFO",
+        "message": "Conexão validada com sucesso.",
+        "data": {
+          "user_id": 32006,
+          "user_name": "ERON PONCE PEREIRA"
+        }
+      },
+      {
+        "timestamp": "2026-04-02T20:43:09Z",
+        "level": "INFO",
+        "message": "Iniciando processamento da turma.",
+        "data": {
+          "course_ref": "33860"
+        }
+      },
+      {
+        "timestamp": "2026-04-02T20:43:10Z",
+        "level": "ERROR",
+        "message": "Falha ao publicar comunicado na turma.",
+        "data": {
+          "course_ref": "33860",
+          "error": {
+            "message": "Canvas respondeu com status 400 para POST https://unifil.test.instructure.com/api/v1/courses/33860/discussion_topics",
+            "status_code": 400,
+            "details": {
+              "errors": {
+                "published": [
+                  {
+                    "attribute": "workflow_state",
+                    "message": "Este assunto não pode ser definido como rascunho porque é um aviso.",
+                    "type": "Este assunto não pode ser definido como rascunho porque é um aviso."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    ],
+    "report_filename": "announcement-report-bdf69b45bcce.csv"
+  },
+  {
+    "id": "c8213b611966",
+    "kind": "announcement",
+    "title": "teste5",
+    "status": "completed",
+    "created_at": "2026-04-02T20:39:36Z",
+    "updated_at": "2026-04-02T20:39:39Z",
+    "finished_at": "2026-04-02T20:39:39Z",
+    "progress": {
+      "current": 1,
+      "total": 1,
+      "percent": 100,
+      "step": "Concluído"
+    },
+    "summary": {
+      "course_refs": [
+        "33860"
+      ],
+      "group_ids": [],
+      "select_all_groups": false
+    },
+    "result": {
+      "summary": {
+        "requested_at": "2026-04-02T20:39:39Z",
+        "requested_by": {
+          "id": 32006,
+          "name": "ERON PONCE PEREIRA"
+        },
+        "courses_processed": 1,
+        "success_count": 1,
+        "failure_count": 0,
+        "dry_run": false,
+        "publish_mode": "publish_now",
+        "lock_comment": false
+      },
+      "course_results": [
+        {
+          "course_ref": "33860",
+          "course_id": 33860,
+          "course_name": "INTRODUCAO AO PYTHON",
+          "status": "success",
+          "announcement_id": 123469,
+          "announcement_url": "https://unifil.test.instructure.com/courses/33860/discussion_topics/123469",
+          "published": true,
+          "delayed_post_at": null,
+          "dry_run": false,
+          "error": null
+        }
+      ]
+    },
+    "error": null,
+    "logs": [
+      {
+        "timestamp": "2026-04-02T20:39:37Z",
+        "level": "INFO",
+        "message": "Conexão validada com sucesso.",
+        "data": {
+          "user_id": 32006,
+          "user_name": "ERON PONCE PEREIRA"
+        }
+      },
+      {
+        "timestamp": "2026-04-02T20:39:37Z",
+        "level": "INFO",
+        "message": "Iniciando processamento da turma.",
+        "data": {
+          "course_ref": "33860"
+        }
+      },
+      {
+        "timestamp": "2026-04-02T20:39:39Z",
+        "level": "INFO",
+        "message": "Comunicado criado com sucesso.",
+        "data": {
+          "course_id": 33860,
+          "announcement_id": 123469
+        }
+      }
+    ],
+    "report_filename": "announcement-report-c8213b611966.csv"
+  },
+  {
+    "id": "90113d0f9d81",
+    "kind": "announcement",
+    "title": "teste de recado",
+    "status": "completed",
+    "created_at": "2026-04-02T20:12:03Z",
+    "updated_at": "2026-04-02T20:12:16Z",
+    "finished_at": "2026-04-02T20:12:16Z",
+    "progress": {
+      "current": 2,
+      "total": 2,
+      "percent": 100,
+      "step": "Concluído"
+    },
+    "summary": {
+      "course_refs": [
+        "34052",
+        "34053"
+      ],
+      "group_ids": [
+        "3162f37f155f"
+      ],
+      "select_all_groups": false
+    },
+    "result": {
+      "summary": {
+        "requested_at": "2026-04-02T20:12:16Z",
+        "requested_by": {
+          "id": 32006,
+          "name": "ERON PONCE PEREIRA"
+        },
+        "courses_processed": 2,
+        "success_count": 2,
+        "failure_count": 0,
+        "dry_run": true,
+        "publish_mode": "publish_now",
+        "lock_comment": false
+      },
+      "course_results": [
+        {
+          "course_ref": "34052",
+          "course_id": 34052,
+          "course_name": "Empreendedorismo",
+          "status": "success",
+          "announcement_id": null,
+          "announcement_url": null,
+          "published": true,
+          "delayed_post_at": null,
+          "dry_run": true,
+          "error": null
+        },
+        {
+          "course_ref": "34053",
+          "course_id": 34053,
+          "course_name": "Gerenciamento de Projetos",
+          "status": "success",
+          "announcement_id": null,
+          "announcement_url": null,
+          "published": true,
+          "delayed_post_at": null,
+          "dry_run": true,
+          "error": null
+        }
+      ]
+    },
+    "error": null,
+    "logs": [
+      {
+        "timestamp": "2026-04-02T20:12:15Z",
+        "level": "INFO",
+        "message": "Conexão validada com sucesso.",
+        "data": {
+          "user_id": 32006,
+          "user_name": "ERON PONCE PEREIRA"
+        }
+      },
+      {
+        "timestamp": "2026-04-02T20:12:15Z",
+        "level": "INFO",
+        "message": "Iniciando processamento da turma.",
+        "data": {
+          "course_ref": "34052"
+        }
+      },
+      {
+        "timestamp": "2026-04-02T20:12:16Z",
+        "level": "INFO",
+        "message": "Dry run do comunicado concluído para a turma.",
+        "data": {
+          "course_id": 34052,
+          "course_name": "Empreendedorismo"
+        }
+      },
+      {
+        "timestamp": "2026-04-02T20:12:16Z",
+        "level": "INFO",
+        "message": "Iniciando processamento da turma.",
+        "data": {
+          "course_ref": "34053"
+        }
+      },
+      {
+        "timestamp": "2026-04-02T20:12:16Z",
+        "level": "INFO",
+        "message": "Dry run do comunicado concluído para a turma.",
+        "data": {
+          "course_id": 34053,
+          "course_name": "Gerenciamento de Projetos"
+        }
+      }
+    ],
+    "report_filename": "announcement-report-90113d0f9d81.csv"
+  },
+  {
+    "id": "354cb4f9f414",
+    "kind": "announcement",
+    "title": "Teste4",
+    "status": "completed",
+    "created_at": "2026-04-02T19:27:23Z",
+    "updated_at": "2026-04-02T19:27:27Z",
+    "finished_at": "2026-04-02T19:27:27Z",
+    "progress": {
+      "current": 1,
+      "total": 1,
+      "percent": 100,
+      "step": "Concluído"
+    },
+    "summary": {
+      "course_ids_text": "33896"
+    },
+    "result": {
+      "summary": {
+        "requested_at": "2026-04-02T19:27:27Z",
+        "requested_by": {
+          "id": 32006,
+          "name": "ERON PONCE PEREIRA"
+        },
+        "courses_processed": 1,
+        "success_count": 1,
+        "failure_count": 0,
+        "dry_run": false,
+        "publish_mode": "publish_now",
+        "lock_comment": false
+      },
+      "course_results": [
+        {
+          "course_ref": "33896",
+          "course_id": 33896,
+          "course_name": "EXTENSAO V",
+          "status": "success",
+          "announcement_id": 123468,
+          "announcement_url": "https://unifil.test.instructure.com/courses/33896/discussion_topics/123468",
+          "published": true,
+          "delayed_post_at": null,
+          "dry_run": false,
+          "error": null
+        }
+      ]
+    },
+    "error": null,
+    "logs": [
+      {
+        "timestamp": "2026-04-02T19:27:24Z",
+        "level": "INFO",
+        "message": "Conexão validada com sucesso.",
+        "data": {
+          "user_id": 32006,
+          "user_name": "ERON PONCE PEREIRA"
+        }
+      },
+      {
+        "timestamp": "2026-04-02T19:27:24Z",
+        "level": "INFO",
+        "message": "Iniciando processamento da turma.",
+        "data": {
+          "course_ref": "33896"
+        }
+      },
+      {
+        "timestamp": "2026-04-02T19:27:27Z",
+        "level": "INFO",
+        "message": "Comunicado criado com sucesso.",
+        "data": {
+          "course_id": 33896,
+          "announcement_id": 123468
+        }
+      }
+    ],
+    "report_filename": "announcement-report-354cb4f9f414.csv"
+  },
+  {
+    "id": "91de632f6ec9",
+    "kind": "announcement",
+    "title": "Teste1",
+    "status": "completed",
+    "created_at": "2026-04-02T19:25:06Z",
+    "updated_at": "2026-04-02T19:25:09Z",
+    "finished_at": "2026-04-02T19:25:09Z",
+    "progress": {
+      "current": 1,
+      "total": 1,
+      "percent": 100,
+      "step": "Concluído"
+    },
+    "summary": {
+      "course_ids_text": "33896"
+    },
+    "result": {
+      "summary": {
+        "requested_at": "2026-04-02T19:25:09Z",
+        "requested_by": {
+          "id": 32006,
+          "name": "ERON PONCE PEREIRA"
+        },
+        "courses_processed": 1,
+        "success_count": 1,
+        "failure_count": 0,
+        "dry_run": false,
+        "publish_mode": "publish_now",
+        "lock_comment": false
+      },
+      "course_results": [
+        {
+          "course_ref": "33896",
+          "course_id": 33896,
+          "course_name": "EXTENSAO V",
+          "status": "success",
+          "announcement_id": 123467,
+          "announcement_url": "https://unifil.test.instructure.com/courses/33896/discussion_topics/123467",
+          "published": true,
+          "delayed_post_at": null,
+          "dry_run": false,
+          "error": null
+        }
+      ]
+    },
+    "error": null,
+    "logs": [
+      {
+        "timestamp": "2026-04-02T19:25:07Z",
+        "level": "INFO",
+        "message": "Conexão validada com sucesso.",
+        "data": {
+          "user_id": 32006,
+          "user_name": "ERON PONCE PEREIRA"
+        }
+      },
+      {
+        "timestamp": "2026-04-02T19:25:07Z",
+        "level": "INFO",
+        "message": "Iniciando processamento da turma.",
+        "data": {
+          "course_ref": "33896"
+        }
+      },
+      {
+        "timestamp": "2026-04-02T19:25:09Z",
+        "level": "INFO",
+        "message": "Comunicado criado com sucesso.",
+        "data": {
+          "course_id": 33896,
+          "announcement_id": 123467
+        }
+      }
+    ],
+    "report_filename": "announcement-report-91de632f6ec9.csv"
+  }
+]

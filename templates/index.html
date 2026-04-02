@@ -1,0 +1,449 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Canvas Control Center</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
+  <script defer src="{{ url_for('static', filename='js/app.js') }}"></script>
+</head>
+<body>
+  <div class="app-shell">
+    <header class="app-header">
+      <div class="brand-row">
+        <div>
+          <p class="eyebrow">Canvas Control Center</p>
+          <h1>Painel de Recados</h1>
+        </div>
+      </div>
+
+      <nav class="action-nav" aria-label="Fluxo principal">
+        <button class="tab-button active" data-tab="connection" type="button">
+          <span class="tab-step">01</span>
+          <span class="tab-copy">
+            <strong>Conexao</strong>
+            <small>teste de acesso</small>
+          </span>
+        </button>
+        <button class="tab-button" data-tab="organization" type="button">
+          <span class="tab-step">02</span>
+          <span class="tab-copy">
+            <strong>Organizacao</strong>
+            <small>cursos e grupos</small>
+          </span>
+        </button>
+        <button class="tab-button" data-tab="announcements" type="button">
+          <span class="tab-step">03</span>
+          <span class="tab-copy">
+            <strong>Comunicados</strong>
+            <small>anuncios</small>
+          </span>
+        </button>
+        <button class="tab-button" data-tab="messages" type="button">
+          <span class="tab-step">04</span>
+          <span class="tab-copy">
+            <strong>Caixa de entrada</strong>
+            <small>mensagens</small>
+          </span>
+        </button>
+        <button class="tab-button" data-tab="settings" type="button">
+          <span class="tab-step">05</span>
+          <span class="tab-copy">
+            <strong>Configuracoes</strong>
+            <small>.env local</small>
+          </span>
+        </button>
+        <button class="tab-button" data-tab="reports" type="button">
+          <span class="tab-step">06</span>
+          <span class="tab-copy">
+            <strong>Relatorios</strong>
+            <small>historico e csv</small>
+          </span>
+        </button>
+      </nav>
+    </header>
+
+    <div id="globalNotice" class="notice hidden"></div>
+
+    <main class="main-content">
+      <section id="tab-connection" class="tab-panel active">
+        <div class="panel-grid panel-grid-connection">
+          <article class="card">
+            <div class="card-header">
+              <div>
+                <h2>Conexao com o Canvas</h2>
+                <p>Use esta etapa para validar ambiente, token e usuario autenticado.</p>
+              </div>
+              <span id="connectionStatusBadge" class="status-chip status-info">nao testado</span>
+            </div>
+
+            <div class="field-grid">
+              <label class="field field-wide">
+                <span>Base URL</span>
+                <input id="baseUrl" type="text" placeholder="https://sua-instituicao.instructure.com">
+              </label>
+
+              <label class="field">
+                <span>Token de acesso</span>
+                <input id="apiToken" type="password" placeholder="Token pessoal ou API token">
+              </label>
+
+              <label class="field">
+                <span>Tipo do token</span>
+                <select id="tokenType">
+                  <option value="personal">Token pessoal (PAT)</option>
+                  <option value="api">API token / access token</option>
+                </select>
+              </label>
+            </div>
+
+            <div class="button-row">
+              <button id="testConnectionBtn" class="btn btn-primary" type="button">Testar conexao</button>
+            </div>
+          </article>
+
+          <article class="card">
+            <div class="card-header">
+              <div>
+                <h2>Resultado da conexao</h2>
+                <p>Resumo do ambiente ativo e do usuario autenticado.</p>
+              </div>
+            </div>
+            <div id="connectionResult" class="connection-result">
+              Preencha a base URL, informe um token se necessario e teste a autenticacao antes de continuar.
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <section id="tab-organization" class="tab-panel">
+        <div class="panel-grid panel-grid-organization">
+          <article class="card">
+            <div class="card-header">
+              <div>
+                <h2>Cursos cadastrados</h2>
+                <p>Digite o numero do curso. O sistema consulta o Canvas e salva tambem o nome do curso.</p>
+              </div>
+            </div>
+
+            <div class="inline-form">
+              <input id="registeredCourseInput" type="text" placeholder="Numero do curso">
+              <button id="addRegisteredCourseBtn" class="btn btn-primary" type="button">Adicionar curso</button>
+            </div>
+
+            <div id="registeredCourseList" class="compact-list empty-state">Nenhum curso cadastrado.</div>
+          </article>
+
+          <article class="card">
+            <div class="card-header">
+              <div>
+                <h2>Grupos de turmas</h2>
+                <p>Grupos salvos para reutilizar nos comunicados e nas mensagens.</p>
+              </div>
+              <button id="newGroupBtn" class="btn btn-secondary" type="button">Novo grupo</button>
+            </div>
+
+            <div id="groupList" class="compact-list empty-state">Nenhum grupo salvo.</div>
+          </article>
+        </div>
+      </section>
+
+      <section id="tab-announcements" class="tab-panel">
+        <div class="panel-grid panel-grid-announcements">
+          <article class="card">
+            <div class="card-header">
+              <div>
+                <h2>Destino</h2>
+                <p>Por padrao o envio usa grupos salvos. Se quiser, troque para cursos especificos.</p>
+              </div>
+            </div>
+
+            <div class="mode-switch" id="announcementModeSwitch">
+              <button class="mode-button active" type="button" data-kind="announcement" data-mode="groups">Grupos salvos</button>
+              <button class="mode-button" type="button" data-kind="announcement" data-mode="courses">Cursos especificos</button>
+            </div>
+
+            <label class="toggle-line" id="announcementAllGroupsLine">
+              <input id="announcementAllGroups" type="checkbox">
+              <span>Enviar para todos os grupos</span>
+            </label>
+
+            <div id="announcementGroupPicker" class="picker-shell"></div>
+            <div id="announcementCoursePicker" class="picker-shell hidden"></div>
+            <div id="announcementTargetSummary" class="summary-grid"></div>
+          </article>
+
+          <article class="card">
+            <div class="card-header">
+              <div>
+                <h2>Comunicado</h2>
+                <p>Cria `discussion_topics` com `is_announcement=true` para cada turma resolvida.</p>
+              </div>
+            </div>
+
+            <form id="announcementForm" class="stack-form">
+              <label class="field">
+                <span>Titulo</span>
+                <input id="announcementTitle" type="text" placeholder="Atualizacao importante da disciplina">
+              </label>
+
+              <label class="field">
+                <span>Mensagem HTML simples</span>
+                <textarea id="announcementMessage" rows="12" placeholder="<p>Ola turma,</p><p>Segue o recado...</p>"></textarea>
+              </label>
+
+              <div class="field-grid">
+                <label class="field">
+                  <span>Modo de publicacao</span>
+                  <select id="publishMode">
+                    <option value="publish_now">Publicar imediatamente</option>
+                    <option value="draft">Salvar como rascunho</option>
+                    <option value="schedule">Agendar data e hora</option>
+                  </select>
+                </label>
+
+                <label id="scheduleField" class="field hidden">
+                  <span>Agendar para</span>
+                  <input id="announcementScheduleAt" type="datetime-local">
+                </label>
+              </div>
+
+              <div class="checkbox-row">
+                <label><input id="lockComment" type="checkbox"> Bloquear comentarios</label>
+                <label><input id="announcementDryRun" type="checkbox"> Modo teste</label>
+              </div>
+
+              <div class="button-row">
+                <button class="btn btn-primary" type="submit">Publicar comunicado</button>
+              </div>
+            </form>
+
+            <div class="card-subsection">
+              <div class="subsection-header">
+                <div>
+                  <h3>Pre-visualizacao</h3>
+                  <p>Visualizacao local do HTML logo abaixo da mensagem.</p>
+                </div>
+              </div>
+              <iframe id="announcementPreview" class="preview-frame" title="Pre-visualizacao do comunicado"></iframe>
+            </div>
+          </article>
+
+          <article class="card">
+            <div class="card-header">
+              <div>
+                <h2>Logs do lote</h2>
+                <p>Sucessos, falhas por turma e exportacao do CSV.</p>
+              </div>
+            </div>
+            <div id="announcementJobCard" class="job-output empty-state">Nenhum lote de comunicado iniciado.</div>
+          </article>
+        </div>
+      </section>
+
+      <section id="tab-messages" class="tab-panel">
+        <div class="panel-grid panel-grid-messages">
+          <article class="card">
+            <div class="card-header">
+              <div>
+                <h2>Destino</h2>
+                <p>Envio por grupos salvos ou por cursos especificos.</p>
+              </div>
+            </div>
+
+            <div class="mode-switch" id="messageModeSwitch">
+              <button class="mode-button active" type="button" data-kind="message" data-mode="groups">Grupos salvos</button>
+              <button class="mode-button" type="button" data-kind="message" data-mode="courses">Cursos especificos</button>
+            </div>
+
+            <label class="toggle-line" id="messageAllGroupsLine">
+              <input id="messageAllGroups" type="checkbox">
+              <span>Enviar para todos os grupos</span>
+            </label>
+
+            <div id="messageGroupPicker" class="picker-shell"></div>
+            <div id="messageCoursePicker" class="picker-shell hidden"></div>
+            <div id="messageTargetSummary" class="summary-grid"></div>
+          </article>
+
+          <article class="card">
+            <div class="card-header">
+              <div>
+                <h2>Mensagem</h2>
+                <p>Envia mensagens via Conversations para os alunos das turmas selecionadas.</p>
+              </div>
+            </div>
+
+            <form id="messageForm" class="stack-form">
+              <label class="field">
+                <span>Assunto</span>
+                <input id="messageSubject" type="text" placeholder="Aviso importante">
+              </label>
+
+              <label class="field">
+                <span>Mensagem</span>
+                <textarea id="messageBody" rows="12" placeholder="Ola turma,&#10;&#10;Estou enviando este aviso para todos os alunos..."></textarea>
+              </label>
+
+              <label class="field">
+                <span>Estrategia de envio</span>
+                <select id="messageStrategy">
+                  <option value="users">Listar alunos e enviar por usuario</option>
+                  <option value="context">Enviar por contexto da turma</option>
+                </select>
+              </label>
+
+              <div class="checkbox-row">
+                <label><input id="messageDedupe" type="checkbox" checked> Evitar duplicidade entre turmas</label>
+                <label><input id="messageDryRun" type="checkbox"> Modo teste</label>
+              </div>
+
+              <div class="button-row">
+                <button class="btn btn-primary" type="submit">Enviar mensagem</button>
+              </div>
+            </form>
+          </article>
+
+          <article class="card">
+            <div class="card-header">
+              <div>
+                <h2>Resumo e resultado</h2>
+                <p>Leitura rapida do alvo e andamento do lote na mesma coluna.</p>
+              </div>
+            </div>
+            <div id="messageInfoPanel" class="info-panel">
+              Escolha grupos ou cursos especificos para ver o resumo aqui.
+            </div>
+            <div class="card-subsection">
+              <div class="subsection-header">
+                <div>
+                  <h3>Resultado do envio</h3>
+                  <p>Quantidade de alunos encontrados, destinatarios alvo, envios e falhas.</p>
+                </div>
+              </div>
+              <div id="messageJobCard" class="job-output empty-state">Nenhum lote de caixa de entrada iniciado.</div>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <section id="tab-settings" class="tab-panel">
+        <div class="panel-grid panel-grid-settings">
+          <article class="card">
+            <div class="card-header">
+              <div>
+                <h2>Editor do .env</h2>
+                <p>Edicao local do arquivo de ambiente. O painel recarrega as configuracoes depois de salvar.</p>
+              </div>
+            </div>
+
+            <div class="env-meta">
+              <span>Arquivo atual:</span>
+              <code id="envPath">-</code>
+            </div>
+
+            <label class="field">
+              <span>Conteudo do .env</span>
+              <textarea id="envEditor" rows="18" spellcheck="false" placeholder="CANVAS_BASE_URL=https://..."></textarea>
+            </label>
+
+            <div class="button-row">
+              <button id="saveEnvBtn" class="btn btn-primary" type="button">Salvar .env</button>
+            </div>
+          </article>
+
+          <article class="card">
+            <div class="card-header">
+              <div>
+                <h2>Configuracao operacional</h2>
+                <p>Resumo das configuracoes carregadas e dos endpoints oficiais em uso.</p>
+              </div>
+            </div>
+
+            <div id="settingsInfo" class="dashboard-list"></div>
+
+            <div class="card-header spaced-top">
+              <div>
+                <h2>Endpoints oficiais usados</h2>
+              </div>
+            </div>
+            <div class="endpoint-list">
+              <code>GET /api/v1/users/self</code>
+              <code>GET /api/v1/courses</code>
+              <code>GET /api/v1/courses/:course_id</code>
+              <code>GET /api/v1/courses/:course_id/users?enrollment_type[]=student</code>
+              <code>POST /api/v1/courses/:course_id/discussion_topics</code>
+              <code>GET /api/v1/search/recipients</code>
+              <code>POST /api/v1/conversations</code>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <section id="tab-reports" class="tab-panel">
+        <div class="metrics-grid" id="reportMetrics"></div>
+
+        <div class="panel-grid panel-grid-reports">
+          <article class="card">
+            <div class="card-header">
+              <div>
+                <h2>Historico de envios</h2>
+                <p>Relatorios recentes com acesso rapido ao detalhe e ao CSV.</p>
+              </div>
+              <button id="refreshHistoryBtn" class="btn btn-secondary" type="button">Atualizar</button>
+            </div>
+            <div id="historyList" class="compact-list empty-state">Nenhum relatorio encontrado.</div>
+          </article>
+
+          <article class="card">
+            <div class="card-header">
+              <div>
+                <h2>Detalhe do relatorio</h2>
+                <p>Resumo do job selecionado e resultados por turma.</p>
+              </div>
+            </div>
+            <div id="historyDetail" class="history-detail empty-state">Selecione um relatorio para ver os detalhes.</div>
+          </article>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div id="groupModal" class="modal hidden" aria-hidden="true">
+    <div class="modal-backdrop" data-action="close-group-modal"></div>
+    <div class="modal-dialog">
+      <div class="card-header">
+        <div>
+          <h2 id="groupModalTitle">Novo grupo</h2>
+          <p id="groupModalSubtitle">Selecione os cursos que pertencem ao grupo.</p>
+        </div>
+        <button id="closeGroupModalBtn" class="mini-btn ghost" type="button">Fechar</button>
+      </div>
+
+      <div id="groupModalNotice" class="notice hidden"></div>
+
+      <div class="stack-form">
+        <label class="field">
+          <span>Nome do grupo</span>
+          <input id="groupName" type="text" placeholder="Ex.: Turmas da noite">
+        </label>
+
+        <label class="field">
+          <span>Descricao</span>
+          <textarea id="groupDescription" rows="4" placeholder="Resumo opcional do grupo"></textarea>
+        </label>
+
+        <div class="field">
+          <span>Cursos do grupo</span>
+          <div id="groupCoursePicker" class="picker-shell"></div>
+        </div>
+      </div>
+
+      <div class="button-row">
+        <button id="saveGroupBtn" class="btn btn-primary" type="button">Salvar grupo</button>
+        <button id="cancelGroupModalBtn" class="btn btn-secondary" type="button">Cancelar</button>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
