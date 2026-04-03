@@ -27,6 +27,11 @@ const state = {
     id: null,
     item: null,
   },
+  recurrenceReview: {
+    mode: null,
+    payload: null,
+    preview: null,
+  },
   selectedReportId: null,
   templateFocusFieldId: null,
   pickerSearch: {},
@@ -50,9 +55,20 @@ const state = {
     courseRefs: [],
     selectAllGroups: false,
     preview: null,
-    editingId: null,
+    previewSignature: "",
     agendaSearch: "",
     agendaWindowDays: 30,
+    listSearch: "",
+    listStatus: "all",
+  },
+  recurrenceEdit: {
+    id: null,
+    mode: "groups",
+    groupIds: [],
+    courseRefs: [],
+    selectAllGroups: false,
+    preview: null,
+    previewSignature: "",
   },
   engagement: {
     mode: "groups",
@@ -72,6 +88,8 @@ document.addEventListener("DOMContentLoaded", () => {
   updateAnnouncementPreview();
   updateMessagePreview();
   updateRecurrenceSamplePreview();
+  updateRecurrenceEditSamplePreview();
+  updateEngagementMessagePreview();
   loadInitialData();
 });
 
@@ -162,6 +180,23 @@ function bindEvents() {
       closeRecurrenceCancelModal();
     }
   });
+  $("#closeRecurrenceEditModalBtn").addEventListener("click", closeRecurrenceEditModal);
+  $("#cancelRecurrenceEditBtn").addEventListener("click", closeRecurrenceEditModal);
+  $("#previewRecurrenceEditBtn").addEventListener("click", previewRecurrenceEdit);
+  $("#recurrenceEditForm").addEventListener("submit", submitRecurrenceEdit);
+  $("#recurrenceEditModal").addEventListener("click", (event) => {
+    if (event.target.dataset.action === "close-recurrence-edit-modal") {
+      closeRecurrenceEditModal();
+    }
+  });
+  $("#closeRecurrenceReviewModalBtn").addEventListener("click", closeRecurrenceReviewModal);
+  $("#cancelRecurrenceReviewBtn").addEventListener("click", closeRecurrenceReviewModal);
+  $("#confirmRecurrenceReviewBtn").addEventListener("click", confirmRecurrenceReview);
+  $("#recurrenceReviewModal").addEventListener("click", (event) => {
+    if (event.target.dataset.action === "close-recurrence-review-modal") {
+      closeRecurrenceReviewModal();
+    }
+  });
 
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && !$("#groupModal").classList.contains("hidden")) {
@@ -172,6 +207,12 @@ function bindEvents() {
     }
     if (event.key === "Escape" && !$("#recurrenceCancelModal").classList.contains("hidden")) {
       closeRecurrenceCancelModal();
+    }
+    if (event.key === "Escape" && !$("#recurrenceEditModal").classList.contains("hidden")) {
+      closeRecurrenceEditModal();
+    }
+    if (event.key === "Escape" && !$("#recurrenceReviewModal").classList.contains("hidden")) {
+      closeRecurrenceReviewModal();
     }
   });
 
@@ -188,10 +229,14 @@ function bindEvents() {
   });
   $("#recurrenceAllGroups").addEventListener("change", () => {
     state.recurrence.selectAllGroups = $("#recurrenceAllGroups").checked;
-    state.recurrence.preview = null;
-    renderRecurrencePreview(null);
+    invalidateRecurrencePreview("recurrence");
     renderTargetControls("recurrence");
     persistUiState();
+  });
+  $("#recurrenceEditAllGroups").addEventListener("change", () => {
+    state.recurrenceEdit.selectAllGroups = $("#recurrenceEditAllGroups").checked;
+    invalidateRecurrencePreview("recurrenceEdit");
+    renderTargetControls("recurrenceEdit");
   });
   $("#engagementAllGroups").addEventListener("change", () => {
     state.engagement.selectAllGroups = $("#engagementAllGroups").checked;
@@ -214,6 +259,7 @@ function bindEvents() {
 
   $("#publishMode").addEventListener("change", () => {
     toggleScheduleField();
+    renderAnnouncementInfoPanel();
     persistUiState();
   });
   $("#announcementTitle").addEventListener("input", () => {
@@ -225,8 +271,15 @@ function bindEvents() {
     persistUiState();
   });
   $("#announcementScheduleAt").addEventListener("input", persistUiState);
-  $("#lockComment").addEventListener("change", persistUiState);
-  $("#announcementDryRun").addEventListener("change", persistUiState);
+  $("#announcementScheduleAt").addEventListener("input", renderAnnouncementInfoPanel);
+  $("#lockComment").addEventListener("change", () => {
+    renderAnnouncementInfoPanel();
+    persistUiState();
+  });
+  $("#announcementDryRun").addEventListener("change", () => {
+    renderAnnouncementInfoPanel();
+    persistUiState();
+  });
   $("#announcementAttachment").addEventListener("change", updateAttachmentMeta);
   $("#announcementForm").addEventListener("submit", submitAnnouncementJob);
 
@@ -239,25 +292,50 @@ function bindEvents() {
     persistUiState();
   });
   $("#messageStrategy").addEventListener("change", persistUiState);
-  $("#messageDedupe").addEventListener("change", persistUiState);
+  $("#messageStrategy").addEventListener("change", renderMessageInfoPanel);
+  $("#messageDedupe").addEventListener("change", () => {
+    renderMessageInfoPanel();
+    persistUiState();
+  });
   $("#messageDryRun").addEventListener("change", persistUiState);
+  $("#messageDryRun").addEventListener("change", renderMessageInfoPanel);
   $("#messageAttachment").addEventListener("change", updateAttachmentMeta);
   $("#messageForm").addEventListener("submit", submitMessageJob);
 
-  $("#recurrenceName").addEventListener("input", persistUiState);
+  $("#recurrenceName").addEventListener("input", () => {
+    invalidateRecurrencePreview("recurrence");
+    persistUiState();
+  });
   $("#recurrenceTitle").addEventListener("input", () => {
+    invalidateRecurrencePreview("recurrence");
     updateRecurrenceSamplePreview();
     persistUiState();
   });
   $("#recurrenceMessage").addEventListener("input", () => {
+    invalidateRecurrencePreview("recurrence");
     updateRecurrenceSamplePreview();
     persistUiState();
   });
-  $("#recurrenceType").addEventListener("change", persistUiState);
-  $("#recurrenceInterval").addEventListener("input", persistUiState);
-  $("#recurrenceFirstPublishAt").addEventListener("input", persistUiState);
-  $("#recurrenceOccurrences").addEventListener("input", persistUiState);
-  $("#recurrenceLockComment").addEventListener("change", persistUiState);
+  $("#recurrenceType").addEventListener("change", () => {
+    invalidateRecurrencePreview("recurrence");
+    persistUiState();
+  });
+  $("#recurrenceInterval").addEventListener("input", () => {
+    invalidateRecurrencePreview("recurrence");
+    persistUiState();
+  });
+  $("#recurrenceFirstPublishAt").addEventListener("input", () => {
+    invalidateRecurrencePreview("recurrence");
+    persistUiState();
+  });
+  $("#recurrenceOccurrences").addEventListener("input", () => {
+    invalidateRecurrencePreview("recurrence");
+    persistUiState();
+  });
+  $("#recurrenceLockComment").addEventListener("change", () => {
+    invalidateRecurrencePreview("recurrence");
+    persistUiState();
+  });
   $("#recurrenceAgendaSearch").addEventListener("input", () => {
     state.recurrence.agendaSearch = $("#recurrenceAgendaSearch").value.trim().toLowerCase();
     renderRecurrenceAgenda();
@@ -268,9 +346,50 @@ function bindEvents() {
     renderRecurrenceAgenda();
     persistUiState();
   });
+  $("#recurrenceListSearch").addEventListener("input", () => {
+    state.recurrence.listSearch = $("#recurrenceListSearch").value.trim().toLowerCase();
+    renderRecurrences();
+    persistUiState();
+  });
+  $("#recurrenceListStatus").addEventListener("change", () => {
+    state.recurrence.listStatus = $("#recurrenceListStatus").value || "all";
+    renderRecurrences();
+    persistUiState();
+  });
   $("#previewRecurrenceBtn").addEventListener("click", previewRecurrence);
-  $("#clearRecurrenceEditBtn").addEventListener("click", clearRecurrenceEditMode);
   $("#recurrenceForm").addEventListener("submit", submitRecurrence);
+  $("#recurrenceEditName").addEventListener("input", () => {
+    invalidateRecurrencePreview("recurrenceEdit");
+    updateRecurrenceEditSamplePreview();
+  });
+  $("#recurrenceEditTitle").addEventListener("input", () => {
+    invalidateRecurrencePreview("recurrenceEdit");
+    updateRecurrenceEditSamplePreview();
+  });
+  $("#recurrenceEditMessage").addEventListener("input", () => {
+    invalidateRecurrencePreview("recurrenceEdit");
+    updateRecurrenceEditSamplePreview();
+  });
+  $("#recurrenceEditType").addEventListener("change", () => {
+    invalidateRecurrencePreview("recurrenceEdit");
+    updateRecurrenceEditSamplePreview();
+  });
+  $("#recurrenceEditInterval").addEventListener("input", () => {
+    invalidateRecurrencePreview("recurrenceEdit");
+    updateRecurrenceEditSamplePreview();
+  });
+  $("#recurrenceEditFirstPublishAt").addEventListener("input", () => {
+    invalidateRecurrencePreview("recurrenceEdit");
+    updateRecurrenceEditSamplePreview();
+  });
+  $("#recurrenceEditOccurrences").addEventListener("input", () => {
+    invalidateRecurrencePreview("recurrenceEdit");
+    updateRecurrenceEditSamplePreview();
+  });
+  $("#recurrenceEditLockComment").addEventListener("change", () => {
+    invalidateRecurrencePreview("recurrenceEdit");
+    updateRecurrenceEditSamplePreview();
+  });
 
   $("#engagementCriteriaMode").addEventListener("change", () => {
     state.engagement.preview = null;
@@ -284,9 +403,18 @@ function bindEvents() {
   $("#engagementOnlyModules").addEventListener("change", persistUiState);
   $("#engagementRequireNeverAccessed").addEventListener("change", persistUiState);
   $("#engagementRequireIncomplete").addEventListener("change", persistUiState);
-  $("#engagementSubject").addEventListener("input", persistUiState);
-  $("#engagementMessage").addEventListener("input", persistUiState);
-  $("#engagementDryRun").addEventListener("change", persistUiState);
+  $("#engagementSubject").addEventListener("input", () => {
+    updateEngagementMessagePreview();
+    persistUiState();
+  });
+  $("#engagementMessage").addEventListener("input", () => {
+    updateEngagementMessagePreview();
+    persistUiState();
+  });
+  $("#engagementDryRun").addEventListener("change", () => {
+    updateEngagementMessagePreview();
+    persistUiState();
+  });
   $("#previewEngagementBtn").addEventListener("click", previewEngagementTargets);
   $("#engagementForm").addEventListener("submit", submitEngagementJob);
 
@@ -321,8 +449,10 @@ function handleDelegatedClick(event) {
       renderEngagementPreview(null);
     }
     if (kind === "recurrence") {
-      state.recurrence.preview = null;
-      renderRecurrencePreview(null);
+      invalidateRecurrencePreview("recurrence");
+    }
+    if (kind === "recurrenceEdit") {
+      invalidateRecurrencePreview("recurrenceEdit");
     }
     renderModeSwitch(kind);
     renderTargetControls(kind);
@@ -470,6 +600,8 @@ function restoreUiState() {
     $("#recurrenceLockComment").checked = Boolean(saved.recurrenceLockComment);
     $("#recurrenceAgendaSearch").value = saved.recurrenceAgendaSearch || "";
     $("#recurrenceAgendaWindow").value = saved.recurrenceAgendaWindow || "30";
+    $("#recurrenceListSearch").value = saved.recurrenceListSearch || "";
+    $("#recurrenceListStatus").value = saved.recurrenceListStatus || "all";
     $("#engagementCriteriaMode").value = saved.engagementCriteriaMode || "never_accessed_or_incomplete_resources";
     $("#engagementMatchMode").value = saved.engagementMatchMode || "or";
     $("#engagementInactiveDays").value = saved.engagementInactiveDays || "";
@@ -486,9 +618,11 @@ function restoreUiState() {
     }
     state.announcement = { ...state.announcement, ...(saved.announcement || {}) };
     state.message = { ...state.message, ...(saved.message || {}) };
-    state.recurrence = { ...state.recurrence, ...(saved.recurrence || {}), preview: null, editingId: null };
+    state.recurrence = { ...state.recurrence, ...(saved.recurrence || {}), preview: null };
     state.recurrence.agendaSearch = saved.recurrenceAgendaSearch || "";
     state.recurrence.agendaWindowDays = Number(saved.recurrenceAgendaWindow || saved.recurrence?.agendaWindowDays || 30);
+    state.recurrence.listSearch = saved.recurrenceListSearch || saved.recurrence?.listSearch || "";
+    state.recurrence.listStatus = saved.recurrenceListStatus || saved.recurrence?.listStatus || "all";
     state.engagement = { ...state.engagement, ...(saved.engagement || {}), preview: null };
     if (!["groups", "courses"].includes(state.message.mode)) {
       state.message.mode = "groups";
@@ -535,6 +669,8 @@ function persistUiState() {
       recurrenceLockComment: $("#recurrenceLockComment").checked,
       recurrenceAgendaSearch: $("#recurrenceAgendaSearch").value,
       recurrenceAgendaWindow: $("#recurrenceAgendaWindow").value,
+      recurrenceListSearch: $("#recurrenceListSearch").value,
+      recurrenceListStatus: $("#recurrenceListStatus").value,
       engagementCriteriaMode: $("#engagementCriteriaMode").value,
       engagementMatchMode: $("#engagementMatchMode").value,
       engagementInactiveDays: $("#engagementInactiveDays").value,
@@ -560,6 +696,8 @@ function persistUiState() {
         selectAllGroups: state.recurrence.selectAllGroups,
         agendaSearch: state.recurrence.agendaSearch,
         agendaWindowDays: state.recurrence.agendaWindowDays,
+        listSearch: state.recurrence.listSearch,
+        listStatus: state.recurrence.listStatus,
       },
       engagement: {
         mode: state.engagement.mode,
@@ -648,6 +786,7 @@ function ensureTargetSelection(kind) {
   const tabMap = {
     announcement: "announcements",
     recurrence: "recurrence",
+    recurrenceEdit: "recurrence",
     message: "messages",
     engagement: "engagement",
   };
@@ -798,11 +937,13 @@ function pruneSelections() {
   state.announcement.groupIds = state.announcement.groupIds.filter((id) => validGroupIds.has(id));
   state.message.groupIds = state.message.groupIds.filter((id) => validGroupIds.has(id));
   state.recurrence.groupIds = state.recurrence.groupIds.filter((id) => validGroupIds.has(id));
+  state.recurrenceEdit.groupIds = state.recurrenceEdit.groupIds.filter((id) => validGroupIds.has(id));
   state.engagement.groupIds = state.engagement.groupIds.filter((id) => validGroupIds.has(id));
   const validCourseRefs = new Set(state.registeredCourses.map((item) => item.course_ref));
   state.announcement.courseRefs = state.announcement.courseRefs.filter((ref) => validCourseRefs.has(ref));
   state.message.courseRefs = state.message.courseRefs.filter((ref) => validCourseRefs.has(ref));
   state.recurrence.courseRefs = state.recurrence.courseRefs.filter((ref) => validCourseRefs.has(ref));
+  state.recurrenceEdit.courseRefs = state.recurrenceEdit.courseRefs.filter((ref) => validCourseRefs.has(ref));
   state.engagement.courseRefs = state.engagement.courseRefs.filter((ref) => validCourseRefs.has(ref));
   const selectableCatalogRefs = new Set(
     state.courseCatalog
@@ -818,17 +959,23 @@ function renderAll() {
   renderGroups();
   renderModeSwitch("announcement");
   renderModeSwitch("recurrence");
+  renderModeSwitch("recurrenceEdit");
   renderModeSwitch("message");
   renderModeSwitch("engagement");
   renderTargetControls("announcement");
   renderTargetControls("recurrence");
+  renderTargetControls("recurrenceEdit");
   renderTargetControls("message");
   renderTargetControls("engagement");
   renderCatalogCourseSummary();
+  renderAnnouncementInfoPanel();
+  renderMessageInfoPanel();
+  renderRecurrenceInfoPanel();
+  renderRecurrenceEditInfoPanel();
   renderRecurrencePreview(state.recurrence.preview);
+  renderRecurrenceEditPreview(state.recurrenceEdit.preview);
   renderRecurrences();
   renderRecurrenceAgenda();
-  renderRecurrenceEditorState();
   renderEngagementPreview(state.engagement.preview);
   renderReports();
   renderSettingsInfo(state.config || {});
@@ -836,6 +983,7 @@ function renderAll() {
   updateAnnouncementPreview();
   updateMessagePreview();
   updateRecurrenceSamplePreview();
+  updateEngagementMessagePreview();
   updateAttachmentMeta({ target: $("#announcementAttachment") });
   updateAttachmentMeta({ target: $("#messageAttachment") });
   renderEnvEditorState();
@@ -1112,13 +1260,14 @@ function renderGroups() {
   `).join("");
 }
 
-function renderRecurrencePreview(preview) {
-  const summary = $("#recurrencePreviewSummary");
-  const schedule = $("#recurrenceSchedulePreview");
+function renderRecurrencePreview(preview, options = {}) {
+  const summary = $(options.summarySelector || "#recurrencePreviewSummary");
+  const schedule = $(options.scheduleSelector || "#recurrenceSchedulePreview");
+  const emptyText = options.emptyText || "Selecione as turmas e clique em prever datas.";
   if (!summary || !schedule) return;
   if (!preview) {
     summary.innerHTML = "";
-    schedule.innerHTML = `<div class="empty-state">Selecione as turmas e clique em prever datas.</div>`;
+    schedule.innerHTML = `<div class="empty-state">${escapeHtml(emptyText)}</div>`;
     return;
   }
   summary.innerHTML = `
@@ -1166,12 +1315,29 @@ function renderRecurrencePreview(preview) {
 
 function renderRecurrences() {
   const container = $("#recurrenceList");
+  const summary = $("#recurrenceListSummary");
   if (!container) return;
+  const items = filterRecurrenceListItems(state.recurrences);
+  const activeCount = items.filter((item) => item.is_active).length;
+  const futureCount = items.reduce((total, item) => total + Number(item.future_items || 0), 0);
+  const errorCount = items.filter((item) => Number(item.error_items || 0) > 0 || item.last_error).length;
+  if (summary) {
+    summary.innerHTML = `
+      <div class="summary-card"><span>Visiveis</span><strong>${escapeHtml(String(items.length))}</strong></div>
+      <div class="summary-card"><span>Ativas</span><strong>${escapeHtml(String(activeCount))}</strong></div>
+      <div class="summary-card"><span>Publicacoes futuras</span><strong>${escapeHtml(String(futureCount))}</strong></div>
+      <div class="summary-card"><span>Com erro</span><strong>${escapeHtml(String(errorCount))}</strong></div>
+    `;
+  }
   if (!state.recurrences.length) {
     container.innerHTML = `<div class="empty-state">Nenhuma recorrencia criada.</div>`;
     return;
   }
-  container.innerHTML = state.recurrences.map((item) => `
+  if (!items.length) {
+    container.innerHTML = `<div class="empty-state">Nenhuma recorrencia corresponde aos filtros atuais.</div>`;
+    return;
+  }
+  container.innerHTML = items.map((item) => `
     <div class="group-card">
       <div class="group-card-header">
         <div>
@@ -1190,6 +1356,13 @@ function renderRecurrences() {
         <div class="summary-card"><span>Cancelados</span><strong>${escapeHtml(String(item.canceled_items || 0))}</strong></div>
         <div class="summary-card"><span>Proximo</span><strong>${escapeHtml(formatDate(item.next_publish_at || ""))}</strong></div>
       </div>
+      <div class="recurrence-timeline">
+        ${timelinePill("Criada", item.created_at)}
+        ${timelinePill("Atualizada", item.updated_at)}
+        ${item.canceled_at ? timelinePill("Cancelada", item.canceled_at, "warn") : ""}
+        ${item.last_error ? `<span class="timeline-pill danger">Erro recente</span>` : ""}
+        <span class="timeline-pill">${escapeHtml(recurrenceStatusLabel(item))}</span>
+      </div>
       ${item.cancel_reason ? `<div class="compact-meta">Cancelamento: ${escapeHtml(item.cancel_reason)}</div>` : ""}
       ${item.last_error ? `<div class="compact-meta text-danger">${escapeHtml(item.last_error)}</div>` : ""}
       <div class="chips">
@@ -1197,6 +1370,28 @@ function renderRecurrences() {
       </div>
     </div>
   `).join("");
+}
+
+function filterRecurrenceListItems(items) {
+  const search = String(state.recurrence.listSearch || "").trim().toLowerCase();
+  const status = state.recurrence.listStatus || "all";
+  return items.filter((item) => {
+    const haystack = [
+      item.name,
+      item.title,
+      item.recurrence_type,
+      item.cancel_reason,
+      item.last_error,
+      ...(item.items || []).flatMap((entry) => [entry.course_name, entry.course_ref, entry.status]),
+    ].join(" ").toLowerCase();
+    if (search && !haystack.includes(search)) return false;
+    if (status === "active" && !item.is_active) return false;
+    if (status === "inactive" && item.is_active) return false;
+    if (status === "error" && !(Number(item.error_items || 0) > 0 || item.last_error)) return false;
+    if (status === "upcoming" && !(Number(item.future_items || 0) > 0)) return false;
+    if (status === "canceled" && !(Number(item.canceled_items || 0) > 0 || item.canceled_at)) return false;
+    return true;
+  });
 }
 
 function renderRecurrenceAgenda() {
@@ -1207,11 +1402,17 @@ function renderRecurrenceAgenda() {
   const uniqueRecurrences = unique(items.map((item) => item.recurrence_id));
   const uniqueCourses = unique(items.map((item) => item.course_ref));
   const nextItem = items[0] || null;
+  const todayCount = items.filter((item) => item.day_bucket === "today").length;
+  const nextSevenDaysCount = items.filter((item) => item.day_offset >= 0 && item.day_offset <= 6).length;
+  const recentChangeCount = unique(items.filter((item) => item.change_label).map((item) => item.recurrence_id)).length;
   summary.innerHTML = `
     <div class="summary-card"><span>Publicacoes</span><strong>${escapeHtml(String(items.length))}</strong></div>
     <div class="summary-card"><span>Recorrencias</span><strong>${escapeHtml(String(uniqueRecurrences.length))}</strong></div>
     <div class="summary-card"><span>Turmas</span><strong>${escapeHtml(String(uniqueCourses.length))}</strong></div>
-    <div class="summary-card"><span>Proxima</span><strong>${escapeHtml(nextItem ? formatDate(nextItem.scheduled_for) : "-")}</strong></div>
+    <div class="summary-card"><span>Hoje</span><strong>${escapeHtml(String(todayCount))}</strong></div>
+    <div class="summary-card"><span>Proximos 7 dias</span><strong>${escapeHtml(String(nextSevenDaysCount))}</strong></div>
+    <div class="summary-card"><span>Ajustadas recente</span><strong>${escapeHtml(String(recentChangeCount))}</strong></div>
+    <div class="summary-card"><span>Proxima</span><strong>${escapeHtml(nextItem ? formatDateTime(nextItem.scheduled_for) : "-")}</strong></div>
   `;
   if (!items.length) {
     list.classList.add("empty-state");
@@ -1230,7 +1431,7 @@ function renderRecurrenceAgenda() {
       </div>
       <div class="dashboard-list">
         ${group.items.map((item) => `
-          <div class="dashboard-item">
+          <div class="dashboard-item agenda-item ${item.day_bucket === "today" ? "agenda-item-today" : ""}">
             <div class="compact-header">
               <div>
                 <strong>${escapeHtml(item.recurrence_name || item.title || "Recorrencia")}</strong>
@@ -1238,10 +1439,16 @@ function renderRecurrenceAgenda() {
               </div>
               <div class="history-actions">
                 <span class="chip">${escapeHtml(item.time_label)}</span>
+                <span class="timeline-pill">${escapeHtml(item.relative_label)}</span>
                 ${statusChip(item.status || "scheduled")}
               </div>
             </div>
             <div class="compact-meta">${escapeHtml(item.course_name || item.course_ref || "-")} | ${escapeHtml(item.course_ref || "-")}</div>
+            <div class="recurrence-timeline">
+              ${item.change_label ? `<span class="timeline-pill info">${escapeHtml(item.change_label)}</span>` : ""}
+              ${item.created_at ? timelinePill("Criada", item.created_at) : ""}
+              ${item.updated_at && item.updated_at !== item.created_at ? timelinePill("Atualizada", item.updated_at) : ""}
+            </div>
           </div>
         `).join("")}
       </div>
@@ -1263,6 +1470,9 @@ function buildRecurrenceAgendaItems() {
       course_ref: item.course_ref || "",
       scheduled_for: item.scheduled_for,
       status: item.status || "scheduled",
+      created_at: recurrence.created_at || "",
+      updated_at: recurrence.updated_at || "",
+      change_label: recurrenceChangeLabel(recurrence),
       search: `${recurrence.name || ""} ${recurrence.title || ""} ${item.course_name || ""} ${item.course_ref || ""}`.toLowerCase(),
     }));
   }).filter((item) => {
@@ -1275,6 +1485,9 @@ function buildRecurrenceAgendaItems() {
   }).sort((left, right) => new Date(left.scheduled_for).getTime() - new Date(right.scheduled_for).getTime()).map((item) => ({
     ...item,
     time_label: formatAgendaTime(item.scheduled_for),
+    relative_label: formatRelativeAgendaDay(item.scheduled_for),
+    day_offset: dayOffsetFromNow(item.scheduled_for),
+    day_bucket: classifyAgendaDay(item.scheduled_for),
   }));
 }
 
@@ -1291,7 +1504,8 @@ function groupRecurrenceAgendaByDay(items) {
     const date = new Date(item.scheduled_for);
     const key = `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
     if (!map.has(key)) {
-      const entry = { key, label: formatter.format(date), items: [] };
+      const dayOffset = dayOffsetFromNow(item.scheduled_for);
+      const entry = { key, label: formatAgendaGroupLabel(date, formatter, dayOffset), items: [] };
       map.set(key, entry);
       groups.push(entry);
     }
@@ -1309,9 +1523,8 @@ function formatAgendaTime(value) {
   });
 }
 
-function applyRecurrenceToForm(item, mode = "reuse") {
+function applyRecurrenceToForm(item) {
   openTab("recurrence");
-  state.recurrence.editingId = mode === "edit" ? item.id : null;
   $("#recurrenceName").value = item.name || "";
   $("#recurrenceTitle").value = item.title || "";
   $("#recurrenceMessage").value = item.message_html || "";
@@ -1327,46 +1540,211 @@ function applyRecurrenceToForm(item, mode = "reuse") {
   state.recurrence.preview = null;
   renderTargetControls("recurrence");
   renderRecurrencePreview(null);
-  renderRecurrenceEditorState();
   persistUiState();
-  showNotice(
-    mode === "edit"
-      ? `Edicao da recorrencia "${item.name || item.title}" carregada no formulario.`
-      : `Recorrencia "${item.name || item.title}" carregada como base no formulario.`,
-    "success",
-  );
+  showNotice(`Recorrencia "${item.name || item.title}" carregada como base no formulario.`, "success");
 }
 
-function clearRecurrenceEditMode(showFeedback = true) {
-  state.recurrence.editingId = null;
-  state.recurrence.preview = null;
-  renderRecurrenceEditorState();
-  renderRecurrencePreview(null);
-  if (showFeedback) {
-    showNotice("Formulario de recorrencia voltou ao modo de criacao.", "info");
-  }
+function openRecurrenceEditModal(item) {
+  state.recurrenceEdit.id = item.id;
+  state.recurrenceEdit.mode = item.target_mode === "courses" ? "courses" : "groups";
+  state.recurrenceEdit.groupIds = [...((item.target_config_json || {}).group_ids || [])];
+  state.recurrenceEdit.courseRefs = [...((item.target_config_json || {}).course_refs || [])];
+  state.recurrenceEdit.selectAllGroups = Boolean((item.target_config_json || {}).select_all_groups);
+  state.recurrenceEdit.preview = null;
+  state.recurrenceEdit.previewSignature = "";
+  $("#recurrenceEditModalTitle").textContent = `Editar recorrencia: ${item.name || item.title || "Recorrencia"}`;
+  $("#recurrenceEditName").value = item.name || "";
+  $("#recurrenceEditTitle").value = item.title || "";
+  $("#recurrenceEditMessage").value = item.message_html || "";
+  $("#recurrenceEditType").value = item.recurrence_type || "weekly";
+  $("#recurrenceEditInterval").value = String(item.interval_value || 1);
+  $("#recurrenceEditFirstPublishAt").value = formatLocalDateTimeInput(item.first_publish_at);
+  $("#recurrenceEditOccurrences").value = String(item.occurrence_count || 1);
+  $("#recurrenceEditLockComment").checked = Boolean(item.lock_comment);
+  hideRecurrenceEditNotice();
+  renderModeSwitch("recurrenceEdit");
+  renderTargetControls("recurrenceEdit");
+  updateRecurrenceEditSamplePreview();
+  renderRecurrenceEditPreview(null);
+  $("#recurrenceEditModal").classList.remove("hidden");
+  $("#recurrenceEditModal").setAttribute("aria-hidden", "false");
+  focusField("#recurrenceEditName");
 }
 
-function renderRecurrenceEditorState() {
-  const current = state.recurrences.find((item) => item.id === state.recurrence.editingId) || null;
-  if (!current && state.recurrence.editingId) {
-    state.recurrence.editingId = null;
-  }
-  const notice = $("#recurrenceEditState");
-  const clearButton = $("#clearRecurrenceEditBtn");
-  const submitButton = $("#submitRecurrenceBtn");
-  if (!notice || !clearButton || !submitButton) return;
-  if (!current) {
-    notice.classList.add("hidden");
-    notice.textContent = "";
-    clearButton.classList.add("hidden");
-    submitButton.textContent = "Criar recorrencia";
-    return;
-  }
+function closeRecurrenceEditModal() {
+  state.recurrenceEdit = {
+    id: null,
+    mode: "groups",
+    groupIds: [],
+    courseRefs: [],
+    selectAllGroups: false,
+    preview: null,
+    previewSignature: "",
+  };
+  hideRecurrenceEditNotice();
+  $("#recurrenceEditModal").classList.add("hidden");
+  $("#recurrenceEditModal").setAttribute("aria-hidden", "true");
+  $("#recurrenceEditModalTitle").textContent = "Editar recorrencia";
+  $("#recurrenceEditName").value = "";
+  $("#recurrenceEditTitle").value = "";
+  $("#recurrenceEditMessage").value = "";
+  $("#recurrenceEditType").value = "weekly";
+  $("#recurrenceEditInterval").value = "1";
+  $("#recurrenceEditFirstPublishAt").value = "";
+  $("#recurrenceEditOccurrences").value = "8";
+  $("#recurrenceEditLockComment").checked = false;
+  updateRecurrenceEditSamplePreview();
+  renderRecurrenceEditPreview(null);
+}
+
+function showRecurrenceEditNotice(message, type = "info") {
+  const notice = $("#recurrenceEditNotice");
+  if (!notice) return;
+  notice.textContent = message;
+  notice.className = `notice ${type}`;
   notice.classList.remove("hidden");
-  notice.textContent = `Editando ${current.name || current.title || "recorrencia"}: use "Prever datas" para ver quais turmas vao manter, sair ou recriar avisos futuros.`;
-  clearButton.classList.remove("hidden");
-  submitButton.textContent = "Salvar ajustes";
+}
+
+function hideRecurrenceEditNotice() {
+  const notice = $("#recurrenceEditNotice");
+  if (!notice) return;
+  notice.className = "notice hidden";
+  notice.textContent = "";
+}
+
+function openRecurrenceReviewModal(mode, payload, preview) {
+  state.recurrenceReview = { mode, payload, preview };
+  const editing = mode === "edit";
+  $("#recurrenceReviewTitle").textContent = editing ? "Revisar atualizacao da recorrencia" : "Revisar nova recorrencia";
+  $("#recurrenceReviewSubtitle").textContent = editing
+    ? "Confira o impacto nas turmas antes de substituir os avisos futuros no Canvas."
+    : "Confira o impacto antes de criar os avisos recorrentes no Canvas.";
+  $("#confirmRecurrenceReviewBtn").textContent = editing ? "Salvar recorrencia" : "Criar recorrencia";
+  $("#recurrenceReviewSummary").innerHTML = renderRecurrenceReviewSummary(preview, editing);
+  $("#recurrenceReviewTargets").innerHTML = renderRecurrenceReviewTargets(payload);
+  $("#recurrenceReviewSchedule").innerHTML = renderRecurrenceReviewSchedule(preview);
+  hideRecurrenceReviewNotice();
+  $("#recurrenceReviewModal").classList.remove("hidden");
+  $("#recurrenceReviewModal").setAttribute("aria-hidden", "false");
+}
+
+function closeRecurrenceReviewModal() {
+  state.recurrenceReview = { mode: null, payload: null, preview: null };
+  hideRecurrenceReviewNotice();
+  $("#recurrenceReviewModal").classList.add("hidden");
+  $("#recurrenceReviewModal").setAttribute("aria-hidden", "true");
+  $("#recurrenceReviewSummary").innerHTML = "";
+  $("#recurrenceReviewTargets").innerHTML = "Nenhuma turma carregada.";
+  $("#recurrenceReviewSchedule").innerHTML = "Nenhuma previsao carregada.";
+}
+
+function showRecurrenceReviewNotice(message, type = "info") {
+  const notice = $("#recurrenceReviewNotice");
+  if (!notice) return;
+  notice.textContent = message;
+  notice.className = `notice ${type}`;
+  notice.classList.remove("hidden");
+}
+
+function hideRecurrenceReviewNotice() {
+  const notice = $("#recurrenceReviewNotice");
+  if (!notice) return;
+  notice.className = "notice hidden";
+  notice.textContent = "";
+}
+
+function renderRecurrenceReviewSummary(preview, editing) {
+  const summary = preview?.summary || {};
+  const cards = [
+    metricCard("Turmas", summary.courses || 0),
+    metricCard("Ocorrencias por turma", summary.occurrences_per_course || 0),
+    metricCard("Total de avisos", summary.total_announcements || 0),
+    metricCard("Ultima publicacao", formatDate(summary.last_publish_at || "") || "-"),
+  ];
+  if (editing && preview?.edit_diff) {
+    cards.push(
+      metricCard("Turmas novas", preview.edit_diff.added_courses || 0),
+      metricCard("Turmas removidas", preview.edit_diff.removed_courses || 0),
+      metricCard("Turmas atualizadas", preview.edit_diff.updated_courses || 0),
+      metricCard("Avisos que saem", preview.edit_diff.delete_items_expected || 0),
+      metricCard("Avisos que entram", preview.edit_diff.create_items_expected || 0),
+    );
+  }
+  return cards.join("");
+}
+
+function renderRecurrenceReviewTargets(payload) {
+  const groups = resolveRecurrenceReviewGroups(payload);
+  const courses = resolveRecurrenceReviewCourses(payload);
+  const modeLabel = payload?.target_mode === "courses" ? "Cursos especificos" : "Grupos salvos";
+  return `
+    <div class="summary-grid">
+      <div class="summary-card"><span>Modo</span><strong>${escapeHtml(modeLabel)}</strong></div>
+      <div class="summary-card"><span>Grupos</span><strong>${escapeHtml(payload?.target_mode === "groups" ? String(groups.length || 0) : "-")}</strong></div>
+      <div class="summary-card"><span>Turmas</span><strong>${escapeHtml(String(courses.length || 0))}</strong></div>
+    </div>
+    ${groups.length ? `<div class="chips">${groups.map((group) => `<span class="chip">${escapeHtml(group.name)}</span>`).join("")}</div>` : ""}
+    ${courses.length ? `<div class="chips">${courses.map((course) => `<span class="chip">${escapeHtml(course.course_name || course.course_ref)} (${escapeHtml(course.course_ref)})</span>`).join("")}</div>` : `<div class="empty-state">Nenhuma turma carregada.</div>`}
+  `;
+}
+
+function renderRecurrenceReviewSchedule(preview) {
+  if (!preview) return "Nenhuma previsao carregada.";
+  const blocks = [];
+  if (preview.edit_diff?.course_changes?.length) {
+    blocks.push(`
+      <div class="history-item">
+        <div class="history-item-header">
+          <div>
+            <strong>Impacto por turma</strong>
+            <div class="compact-meta">Entradas, saidas e atualizacoes que serao aplicadas.</div>
+          </div>
+        </div>
+        <div class="chips">
+          ${(preview.edit_diff.course_changes || []).map((item) => {
+            const labelMap = { add: "entra", remove: "sai", update: "atualiza", keep: "mantem" };
+            return `<span class="chip">${escapeHtml(item.course_name || item.course_ref)} | ${escapeHtml(labelMap[item.action] || item.action)}</span>`;
+          }).join("")}
+        </div>
+      </div>
+    `);
+  }
+  blocks.push(
+    ...(preview.schedule || []).slice(0, 12).map((item) => `
+      <div class="history-item">
+        <div class="history-item-header">
+          <div>
+            <strong>Ocorrencia ${escapeHtml(String(item.occurrence_index || "-"))}</strong>
+            <div class="compact-meta">${escapeHtml(formatDateTime(item.publish_at || ""))}</div>
+          </div>
+          <div class="history-actions"><span class="chip">${escapeHtml(preview.summary?.recurrence_type || "-")}</span></div>
+        </div>
+      </div>
+    `),
+  );
+  return blocks.join("");
+}
+
+function resolveRecurrenceReviewGroups(payload) {
+  if (!payload || payload.target_mode === "courses") return [];
+  if (payload.select_all_groups) return [...state.groups];
+  const selectedIds = new Set(payload.group_ids || []);
+  return state.groups.filter((group) => selectedIds.has(group.id));
+}
+
+function resolveRecurrenceReviewCourses(payload) {
+  if (!payload) return [];
+  if (payload.target_mode === "courses") {
+    const refs = new Set(payload.course_refs || []);
+    return state.registeredCourses.filter((course) => refs.has(course.course_ref));
+  }
+  const groups = resolveRecurrenceReviewGroups(payload);
+  const seen = new Set();
+  return groups.flatMap((group) => group.courses || []).filter((course) => {
+    if (seen.has(course.course_ref)) return false;
+    seen.add(course.course_ref);
+    return true;
+  });
 }
 
 async function handleGroupClick(event) {
@@ -1607,6 +1985,58 @@ function renderReviewRecipientsSample(items) {
   `;
 }
 
+function renderRecurrenceEditPreview(preview) {
+  renderTargetSummary("recurrenceEdit");
+  renderRecurrencePreview(preview, {
+    summarySelector: "#recurrenceEditPreviewSummary",
+    scheduleSelector: "#recurrenceEditSchedulePreview",
+    emptyText: "Clique em prever impacto para ver o que muda nas publicacoes futuras.",
+  });
+}
+
+function invalidateRecurrencePreview(kind) {
+  if (!state[kind]) return;
+  state[kind].preview = null;
+  state[kind].previewSignature = "";
+  if (kind === "recurrence") {
+    renderRecurrencePreview(null);
+    renderTargetSummary("recurrence");
+    renderRecurrenceInfoPanel();
+    return;
+  }
+  if (kind === "recurrenceEdit") {
+    renderRecurrenceEditPreview(null);
+    renderRecurrenceEditInfoPanel();
+  }
+}
+
+function renderRecurrencePreviewState() {
+  const target = $("#recurrencePreviewState");
+  if (!target) return;
+  const payload = buildRecurrenceRequestBody();
+  const hasSelection = Boolean(getTargetPayload("recurrence").course_refs?.length || getTargetPayload("recurrence").group_ids?.length || getTargetPayload("recurrence").select_all_groups);
+  if (!hasSelection) {
+    target.textContent = "Selecione as turmas para liberar a previsao da recorrencia.";
+    return;
+  }
+  target.textContent = recurrencePreviewIsCurrent("recurrence", payload)
+    ? "Preview atualizado e pronto para a revisao final."
+    : "Altere turmas, datas ou conteudo? Gere um preview novo antes de revisar e criar.";
+}
+
+function renderRecurrenceEditPreviewState() {
+  const target = $("#recurrenceEditPreviewState");
+  if (!target) return;
+  if (!state.recurrenceEdit.id) {
+    target.textContent = "Abra uma recorrencia para editar e gerar o preview do impacto.";
+    return;
+  }
+  const payload = buildRecurrenceEditRequestBody();
+  target.textContent = recurrencePreviewIsCurrent("recurrenceEdit", payload)
+    ? "Preview atualizado e pronto para salvar a edicao."
+    : "Sempre que houver mudanca, gere um preview novo antes de salvar.";
+}
+
 function renderReviewMessage(kind, data) {
   const request = data?.request || {};
   if (kind === "announcement") {
@@ -1651,6 +2081,36 @@ function renderReviewMessage(kind, data) {
           <span>Anexo: ${escapeHtml(request.attachment_name || "Sem anexo")}</span>
           <span>${sampleCourse ? `Turma: ${escapeHtml(sampleCourse.course_name || sampleCourse.course_ref || "-")}` : "Sem turma para amostra"}</span>
           <span>Aluno: ${escapeHtml(sampleStudentName)}</span>
+        </div>
+      </div>
+      <div class="message-block"><pre>${escapeHtml(previewBody)}</pre></div>
+    `;
+  }
+
+  if (kind === "engagement") {
+    const sampleRecipient = Array.isArray(data?.items) && data.items.length
+      ? data.items[0]
+      : firstEngagementPreviewRecipient();
+    const sampleCourse = sampleRecipient
+      ? findCourseByRef(sampleRecipient.course_ref || sampleRecipient.course_id)
+      : firstTargetCourse("engagement");
+    const sampleReason = sampleRecipient?.reasons_label || "Motivo identificado no filtro";
+    const previewSubject = renderCourseTemplate(request.subject || "-", sampleCourse, {
+      student_name: sampleRecipient?.student_name || "Nome do aluno",
+      reason: sampleReason,
+    });
+    const previewBody = renderCourseTemplate(request.message || "", sampleCourse, {
+      student_name: sampleRecipient?.student_name || "Nome do aluno",
+      reason: sampleReason,
+    });
+    return `
+      <div class="message-block">
+        <strong>${escapeHtml(previewSubject)}</strong>
+        <div class="review-target-meta">
+          <span>Criterio: ${escapeHtml(formatCriteriaMode(request.criteria_mode || ""))}</span>
+          <span>Modo teste: ${request.dry_run ? "Sim" : "Nao"}</span>
+          <span>${sampleCourse ? `Turma: ${escapeHtml(sampleCourse.course_name || sampleCourse.course_ref || "-")}` : "Sem turma para amostra"}</span>
+          <span>Aluno: ${escapeHtml(sampleRecipient?.student_name || "Nome do aluno")}</span>
         </div>
       </div>
       <div class="message-block"><pre>${escapeHtml(previewBody)}</pre></div>
@@ -1723,7 +2183,7 @@ async function handleRecurrenceAction(action, recurrenceId) {
     return;
   }
   if (action === "edit") {
-    applyRecurrenceToForm(recurrence, "edit");
+    openRecurrenceEditModal(recurrence);
     return;
   }
   if (action === "reuse") {
@@ -1780,11 +2240,12 @@ function renderModeSwitch(kind) {
 
 function renderTargetControls(kind, options = {}) {
   const target = state[kind];
+  if (!target) return;
   const groupsMode = target.mode === "groups";
   const courseMode = target.mode === "courses";
-  $(`#${kind}AllGroupsLine`).classList.toggle("hidden", !groupsMode);
-  $(`#${kind}GroupPicker`).classList.toggle("hidden", !groupsMode);
-  $(`#${kind}CoursePicker`).classList.toggle("hidden", !courseMode);
+  $(`#${kind}AllGroupsLine`)?.classList.toggle("hidden", !groupsMode);
+  $(`#${kind}GroupPicker`)?.classList.toggle("hidden", !groupsMode);
+  $(`#${kind}CoursePicker`)?.classList.toggle("hidden", !courseMode);
   const allGroupsInput = $(`#${kind}AllGroups`);
   if (allGroupsInput) {
     allGroupsInput.checked = target.selectAllGroups;
@@ -1793,6 +2254,15 @@ function renderTargetControls(kind, options = {}) {
   renderTargetSummary(kind);
   if (kind === "message") {
     renderMessageInfoPanel();
+  }
+  if (kind === "announcement") {
+    renderAnnouncementInfoPanel();
+  }
+  if (kind === "recurrence") {
+    renderRecurrenceInfoPanel();
+  }
+  if (kind === "recurrenceEdit") {
+    renderRecurrenceEditInfoPanel();
   }
   updateTemplatePreviewsForKind(kind);
 }
@@ -1815,6 +2285,12 @@ function renderPickers(options = {}) {
   });
   renderPicker("recurrenceCoursePicker", coursePickerItems(), state.recurrence.courseRefs, {
     preserveScroll: options.preservePickerId === "recurrenceCoursePicker",
+  });
+  renderPicker("recurrenceEditGroupPicker", groupPickerItems(), state.recurrenceEdit.groupIds, {
+    preserveScroll: options.preservePickerId === "recurrenceEditGroupPicker",
+  });
+  renderPicker("recurrenceEditCoursePicker", coursePickerItems(), state.recurrenceEdit.courseRefs, {
+    preserveScroll: options.preservePickerId === "recurrenceEditCoursePicker",
   });
   renderPicker("messageGroupPicker", groupPickerItems(), state.message.groupIds, {
     preserveScroll: options.preservePickerId === "messageGroupPicker",
@@ -1879,6 +2355,8 @@ function rerenderPickerById(pickerId, options = {}) {
     announcementCoursePicker: () => renderPicker("announcementCoursePicker", coursePickerItems(), state.announcement.courseRefs, options),
     recurrenceGroupPicker: () => renderPicker("recurrenceGroupPicker", groupPickerItems(), state.recurrence.groupIds, options),
     recurrenceCoursePicker: () => renderPicker("recurrenceCoursePicker", coursePickerItems(), state.recurrence.courseRefs, options),
+    recurrenceEditGroupPicker: () => renderPicker("recurrenceEditGroupPicker", groupPickerItems(), state.recurrenceEdit.groupIds, options),
+    recurrenceEditCoursePicker: () => renderPicker("recurrenceEditCoursePicker", coursePickerItems(), state.recurrenceEdit.courseRefs, options),
     messageGroupPicker: () => renderPicker("messageGroupPicker", groupPickerItems(), state.message.groupIds, options),
     messageCoursePicker: () => renderPicker("messageCoursePicker", coursePickerItems(), state.message.courseRefs, options),
     engagementGroupPicker: () => renderPicker("engagementGroupPicker", groupPickerItems(), state.engagement.groupIds, options),
@@ -1994,6 +2472,7 @@ function pickerTarget(pickerId) {
       set(next) {
         state.recurrence.groupIds = next;
         state.recurrence.preview = null;
+        state.recurrence.previewSignature = "";
       },
     },
     recurrenceCoursePicker: {
@@ -2002,6 +2481,25 @@ function pickerTarget(pickerId) {
       set(next) {
         state.recurrence.courseRefs = next;
         state.recurrence.preview = null;
+        state.recurrence.previewSignature = "";
+      },
+    },
+    recurrenceEditGroupPicker: {
+      kind: "recurrenceEdit",
+      values: state.recurrenceEdit.groupIds,
+      set(next) {
+        state.recurrenceEdit.groupIds = next;
+        state.recurrenceEdit.preview = null;
+        state.recurrenceEdit.previewSignature = "";
+      },
+    },
+    recurrenceEditCoursePicker: {
+      kind: "recurrenceEdit",
+      values: state.recurrenceEdit.courseRefs,
+      set(next) {
+        state.recurrenceEdit.courseRefs = next;
+        state.recurrenceEdit.preview = null;
+        state.recurrenceEdit.previewSignature = "";
       },
     },
     messageGroupPicker: {
@@ -2045,6 +2543,8 @@ function selectedValues(pickerId) {
   if (pickerId === "announcementCoursePicker") return state.announcement.courseRefs;
   if (pickerId === "recurrenceGroupPicker") return state.recurrence.groupIds;
   if (pickerId === "recurrenceCoursePicker") return state.recurrence.courseRefs;
+  if (pickerId === "recurrenceEditGroupPicker") return state.recurrenceEdit.groupIds;
+  if (pickerId === "recurrenceEditCoursePicker") return state.recurrenceEdit.courseRefs;
   if (pickerId === "messageGroupPicker") return state.message.groupIds;
   if (pickerId === "messageCoursePicker") return state.message.courseRefs;
   if (pickerId === "engagementGroupPicker") return state.engagement.groupIds;
@@ -2087,6 +2587,7 @@ function catalogCoursePickerItems() {
 function renderTargetSummary(kind) {
   const target = state[kind];
   const summaryEl = $(`#${kind}TargetSummary`);
+  if (!target || !summaryEl) return;
   const courses = target.mode === "groups"
     ? selectedGroups(kind).flatMap((group) => group.courses || [])
     : selectedCourses(kind);
@@ -2095,8 +2596,8 @@ function renderTargetSummary(kind) {
     courses: "Cursos especificos",
   };
   const uniqueCourseRefs = unique(courses.map((course) => course.course_ref));
-  if (kind === "recurrence") {
-    const previewSummary = state.recurrence.preview?.summary || null;
+  if (kind === "recurrence" || kind === "recurrenceEdit") {
+    const previewSummary = state[kind].preview?.summary || null;
     summaryEl.innerHTML = `
       <div class="summary-card"><span>Modo</span><strong>${modeLabelMap[target.mode] || "-"}</strong></div>
       <div class="summary-card"><span>Grupos</span><strong>${target.mode === "groups" ? (target.selectAllGroups ? "Todos" : String(selectedGroups(kind).length)) : "-"}</strong></div>
@@ -2123,7 +2624,7 @@ function renderTargetSummary(kind) {
     <div class="summary-card"><span>Modo</span><strong>${modeLabelMap[target.mode] || "-"}</strong></div>
     <div class="summary-card"><span>Grupos</span><strong>${target.mode === "groups" ? (target.selectAllGroups ? "Todos" : String(selectedGroups(kind).length)) : "-"}</strong></div>
     <div class="summary-card"><span>Cursos</span><strong>${escapeHtml(String(uniqueCourseRefs.length))}</strong></div>
-    <div class="summary-card"><span>Selecao</span><strong>${escapeHtml(courses.slice(0, 2).map((course) => course.course_name || course.course_ref).join(" | ") || "Nenhuma")}${courses.length > 2 ? "..." : ""}</strong></div>
+    <div class="summary-card"><span>Em foco</span><strong>${escapeHtml(courses.slice(0, 2).map((course) => course.course_name || course.course_ref).join(" | ") || "Nenhuma")}${courses.length > 2 ? "..." : ""}</strong></div>
   `;
 }
 
@@ -2143,17 +2644,101 @@ function renderMessageInfoPanel() {
   const courses = state.message.mode === "groups"
     ? selectedGroups("message").flatMap((group) => group.courses || [])
     : selectedCourses("message");
+  const request = buildMessageRequestBody();
   $("#messageInfoPanel").innerHTML = courses.length ? `
     <div class="summary-grid">
       <div class="summary-card"><span>Turmas resolvidas</span><strong>${escapeHtml(String(courses.length))}</strong></div>
       <div class="summary-card"><span>Modo</span><strong>${state.message.mode === "courses" ? "Cursos especificos" : "Grupos salvos"}</strong></div>
       <div class="summary-card"><span>Grupos</span><strong>${state.message.mode === "groups" ? (state.message.selectAllGroups ? "Todos" : String(selectedGroups("message").length)) : "-"}</strong></div>
       <div class="summary-card"><span>Cursos</span><strong>${escapeHtml(String(unique(courses.map((course) => course.course_ref)).length))}</strong></div>
+      <div class="summary-card"><span>Estrategia final</span><strong>${escapeHtml(messageReviewStrategyLabel(request))}</strong></div>
+      <div class="summary-card"><span>Modo teste</span><strong>${request.dry_run ? "Sim" : "Nao"}</strong></div>
     </div>
     <div class="chips">
+      <span class="chip">${escapeHtml(request.dedupe ? "Sem duplicidade entre turmas" : "Duplicidade permitida")}</span>
+      <span class="chip">${escapeHtml($("#messageAttachment").files?.[0]?.name || "Sem anexo")}</span>
+      ${messageUsesStudentName(request) ? `<span class="chip">Personalizacao por aluno ativa</span>` : ""}
       ${unique(courses.map((course) => `${course.course_name || course.course_ref} (${course.course_ref})`)).slice(0, 10).map((label) => `<span class="chip">${escapeHtml(label)}</span>`).join("")}
     </div>
-  ` : "Escolha grupos salvos ou cursos especificos para ver o resumo aqui.";
+  ` : "Defina o destino para ver aqui o resumo operacional do envio.";
+}
+
+function renderAnnouncementInfoPanel() {
+  const panel = $("#announcementInfoPanel");
+  if (!panel) return;
+  const courses = state.announcement.mode === "groups"
+    ? selectedGroups("announcement").flatMap((group) => group.courses || [])
+    : selectedCourses("announcement");
+  const request = buildAnnouncementRequestBody();
+  panel.innerHTML = courses.length ? `
+    <div class="summary-grid">
+      <div class="summary-card"><span>Turmas resolvidas</span><strong>${escapeHtml(String(unique(courses.map((course) => course.course_ref)).length))}</strong></div>
+      <div class="summary-card"><span>Publicacao</span><strong>${escapeHtml(formatPublishMode(request.publish_mode))}</strong></div>
+      <div class="summary-card"><span>Bloquear comentarios</span><strong>${request.lock_comment ? "Sim" : "Nao"}</strong></div>
+      <div class="summary-card"><span>Modo teste</span><strong>${request.dry_run ? "Sim" : "Nao"}</strong></div>
+    </div>
+    <div class="chips">
+      <span class="chip">${escapeHtml($("#announcementAttachment").files?.[0]?.name || "Sem anexo")}</span>
+      ${request.publish_mode === "schedule" && request.schedule_at_local ? `<span class="chip">Agenda para ${escapeHtml(formatLocalDateTimeLabel(request.schedule_at_local))}</span>` : ""}
+      ${unique(courses.map((course) => `${course.course_name || course.course_ref} (${course.course_ref})`)).slice(0, 8).map((label) => `<span class="chip">${escapeHtml(label)}</span>`).join("")}
+    </div>
+  ` : "Defina o destino para ver o resumo operacional do comunicado.";
+}
+
+function renderRecurrenceInfoPanel() {
+  const panel = $("#recurrenceInfoPanel");
+  if (!panel) return;
+  const payload = buildRecurrenceRequestBody();
+  const courses = payload.target_mode === "courses"
+    ? selectedCourses("recurrence")
+    : selectedGroups("recurrence").flatMap((group) => group.courses || []);
+  const uniqueCourses = unique(courses.map((course) => course.course_ref));
+  const previewCurrent = recurrencePreviewIsCurrent("recurrence", payload);
+  panel.innerHTML = uniqueCourses.length ? `
+    <div class="summary-grid">
+      <div class="summary-card"><span>Turmas</span><strong>${escapeHtml(String(uniqueCourses.length))}</strong></div>
+      <div class="summary-card"><span>Frequencia</span><strong>${escapeHtml($("#recurrenceType").value === "daily" ? "Diaria" : "Semanal")}</strong></div>
+      <div class="summary-card"><span>Intervalo</span><strong>${escapeHtml(String($("#recurrenceInterval").value || 1))}</strong></div>
+      <div class="summary-card"><span>Ocorrencias</span><strong>${escapeHtml(String($("#recurrenceOccurrences").value || 0))}</strong></div>
+    </div>
+    <div class="chips">
+      <span class="chip">${escapeHtml(previewCurrent ? "Preview atualizado" : "Preview pendente")}</span>
+      <span class="chip">${escapeHtml($("#recurrenceLockComment").checked ? "Comentarios bloqueados" : "Comentarios liberados")}</span>
+      ${payload.first_publish_at_local ? `<span class="chip">Primeira publicacao em ${escapeHtml(formatLocalDateTimeLabel(payload.first_publish_at_local))}</span>` : ""}
+    </div>
+  ` : "Defina o destino e gere a previsao antes de abrir a revisao final.";
+  renderRecurrencePreviewState();
+}
+
+function renderRecurrenceEditInfoPanel() {
+  const panel = $("#recurrenceEditInfoPanel");
+  if (!panel || !state.recurrenceEdit.id) {
+    if (panel) {
+        panel.innerHTML = "Atualize a previsao antes de salvar a edicao da recorrencia.";
+    }
+    renderRecurrenceEditPreviewState();
+    return;
+  }
+  const payload = buildRecurrenceEditRequestBody();
+  const courses = payload.target_mode === "courses"
+    ? selectedCourses("recurrenceEdit")
+    : selectedGroups("recurrenceEdit").flatMap((group) => group.courses || []);
+  const uniqueCourses = unique(courses.map((course) => course.course_ref));
+  const previewCurrent = recurrencePreviewIsCurrent("recurrenceEdit", payload);
+  panel.innerHTML = `
+    <div class="summary-grid">
+      <div class="summary-card"><span>Turmas</span><strong>${escapeHtml(String(uniqueCourses.length))}</strong></div>
+      <div class="summary-card"><span>Frequencia</span><strong>${escapeHtml($("#recurrenceEditType").value === "daily" ? "Diaria" : "Semanal")}</strong></div>
+      <div class="summary-card"><span>Intervalo</span><strong>${escapeHtml(String($("#recurrenceEditInterval").value || 1))}</strong></div>
+      <div class="summary-card"><span>Ocorrencias</span><strong>${escapeHtml(String($("#recurrenceEditOccurrences").value || 0))}</strong></div>
+    </div>
+    <div class="chips">
+      <span class="chip">${escapeHtml(previewCurrent ? "Preview atualizado" : "Preview pendente")}</span>
+      <span class="chip">${escapeHtml($("#recurrenceEditLockComment").checked ? "Comentarios bloqueados" : "Comentarios liberados")}</span>
+      ${payload.first_publish_at_local ? `<span class="chip">Primeira publicacao em ${escapeHtml(formatLocalDateTimeLabel(payload.first_publish_at_local))}</span>` : ""}
+    </div>
+  `;
+  renderRecurrenceEditPreviewState();
 }
 
 function clearMessagePreviewRecipients(options = {}) {
@@ -2257,6 +2842,17 @@ const TEMPLATE_SCOPE_CONFIG = {
       { token: "{{course_code}}", label: "Codigo da disciplina" },
     ],
   },
+  recurrenceEdit: {
+    fields: [
+      { id: "recurrenceEditTitle", label: "Titulo do aviso" },
+      { id: "recurrenceEditMessage", label: "Mensagem" },
+    ],
+    tokens: [
+      { token: "{{course_name}}", label: "Nome da disciplina" },
+      { token: "{{course_ref}}", label: "Numero do curso" },
+      { token: "{{course_code}}", label: "Codigo da disciplina" },
+    ],
+  },
   message: {
     fields: [
       { id: "messageSubject", label: "Assunto" },
@@ -2269,10 +2865,23 @@ const TEMPLATE_SCOPE_CONFIG = {
       { token: "{{course_code}}", label: "Codigo da disciplina" },
     ],
   },
+  engagement: {
+    fields: [
+      { id: "engagementSubject", label: "Assunto" },
+      { id: "engagementMessage", label: "Mensagem" },
+    ],
+    tokens: [
+      { token: "{{student_name}}", label: "Nome do aluno" },
+      { token: "{{course_name}}", label: "Nome da disciplina" },
+      { token: "{{course_ref}}", label: "Numero do curso" },
+      { token: "{{course_code}}", label: "Codigo da disciplina" },
+      { token: "{{reason}}", label: "Motivo da abordagem" },
+    ],
+  },
 };
 
 function renderTemplateAssistants() {
-  ["announcement", "recurrence", "message"].forEach((scope) => {
+  ["announcement", "recurrence", "recurrenceEdit", "message", "engagement"].forEach((scope) => {
     renderTokenPalette(scope);
     renderTemplateStatus(scope);
   });
@@ -2383,6 +2992,14 @@ function updateTemplatePreviewsForKind(kind) {
   }
   if (kind === "recurrence") {
     updateRecurrenceSamplePreview();
+    return;
+  }
+  if (kind === "recurrenceEdit") {
+    updateRecurrenceEditSamplePreview();
+    return;
+  }
+  if (kind === "engagement") {
+    updateEngagementMessagePreview();
   }
 }
 
@@ -2493,6 +3110,11 @@ function validateEngagementForm() {
     focusField("#previewEngagementBtn");
     return false;
   }
+  if (hasInvalidTemplateTokens("engagement")) {
+    showNotice("Existem variaveis invalidas na mensagem para inativos. Use apenas os blocos reconhecidos.", "error");
+    focusField("#engagementSubject");
+    return false;
+  }
   if (!$("#engagementSubject").value.trim()) {
     markInvalid("#engagementSubject");
     focusField("#engagementSubject");
@@ -2536,11 +3158,47 @@ function validateRecurrenceForm() {
   return true;
 }
 
+function validateRecurrenceEditForm() {
+  if (!state.recurrenceEdit.id) {
+    showRecurrenceEditNotice("Selecione uma recorrencia valida para editar.", "error");
+    return false;
+  }
+  if (!ensureConnectionConfigured()) return false;
+  const targetPayload = getTargetPayload("recurrenceEdit");
+  if (!targetPayload.course_refs?.length && !targetPayload.select_all_groups && !targetPayload.group_ids?.length) {
+    showRecurrenceEditNotice("Selecione grupos ou cursos antes de salvar a recorrencia.", "error");
+    return false;
+  }
+  if (hasInvalidTemplateTokens("recurrenceEdit")) {
+    showRecurrenceEditNotice("Existem variaveis invalidas na recorrencia. Use apenas os blocos reconhecidos.", "error");
+    focusField("#recurrenceEditTitle");
+    return false;
+  }
+  if (!$("#recurrenceEditTitle").value.trim()) {
+    markInvalid("#recurrenceEditTitle");
+    focusField("#recurrenceEditTitle");
+    showRecurrenceEditNotice("Informe o titulo da recorrencia de avisos.", "error");
+    return false;
+  }
+  if (!$("#recurrenceEditMessage").value.trim()) {
+    markInvalid("#recurrenceEditMessage");
+    focusField("#recurrenceEditMessage");
+    showRecurrenceEditNotice("Informe a mensagem HTML da recorrencia.", "error");
+    return false;
+  }
+  if (!$("#recurrenceEditFirstPublishAt").value) {
+    markInvalid("#recurrenceEditFirstPublishAt");
+    focusField("#recurrenceEditFirstPublishAt");
+    showRecurrenceEditNotice("Informe a primeira publicacao da recorrencia.", "error");
+    return false;
+  }
+  return true;
+}
+
 function buildRecurrenceRequestBody() {
   return {
     ...getConnectionPayload(),
     ...getTargetPayload("recurrence"),
-    recurrence_id: state.recurrence.editingId || "",
     target_mode: state.recurrence.mode,
     name: $("#recurrenceName").value.trim(),
     title: $("#recurrenceTitle").value.trim(),
@@ -2554,6 +3212,46 @@ function buildRecurrenceRequestBody() {
   };
 }
 
+function buildRecurrenceEditRequestBody() {
+  return {
+    ...getConnectionPayload(),
+    ...getTargetPayload("recurrenceEdit"),
+    recurrence_id: state.recurrenceEdit.id || "",
+    target_mode: state.recurrenceEdit.mode,
+    name: $("#recurrenceEditName").value.trim(),
+    title: $("#recurrenceEditTitle").value.trim(),
+    message_html: $("#recurrenceEditMessage").value.trim(),
+    recurrence_type: $("#recurrenceEditType").value,
+    interval_value: Number($("#recurrenceEditInterval").value || 1),
+    first_publish_at_local: $("#recurrenceEditFirstPublishAt").value,
+    occurrence_count: Number($("#recurrenceEditOccurrences").value || 1),
+    client_timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
+    lock_comment: $("#recurrenceEditLockComment").checked,
+  };
+}
+
+function buildRecurrencePreviewSignature(payload) {
+  return JSON.stringify({
+    recurrence_id: payload.recurrence_id || "",
+    target_mode: payload.target_mode || "groups",
+    group_ids: [...(payload.group_ids || [])].sort(),
+    course_refs: [...(payload.course_refs || [])].sort(),
+    select_all_groups: Boolean(payload.select_all_groups),
+    name: payload.name || "",
+    title: payload.title || "",
+    message_html: payload.message_html || "",
+    recurrence_type: payload.recurrence_type || "",
+    interval_value: Number(payload.interval_value || 0),
+    first_publish_at_local: payload.first_publish_at_local || "",
+    occurrence_count: Number(payload.occurrence_count || 0),
+    lock_comment: Boolean(payload.lock_comment),
+  });
+}
+
+function recurrencePreviewIsCurrent(kind, payload) {
+  return Boolean(state[kind].preview && state[kind].previewSignature && state[kind].previewSignature === buildRecurrencePreviewSignature(payload));
+}
+
 async function previewRecurrence() {
   const button = $("#previewRecurrenceBtn");
   setBusy(button, true, "Calculando...");
@@ -2561,19 +3259,52 @@ async function previewRecurrence() {
   clearFieldValidation();
   try {
     if (!validateRecurrenceForm()) return;
+    const requestBody = buildRecurrenceRequestBody();
     const response = await apiFetch("/api/announcement-recurrences/preview", {
       method: "POST",
-      body: buildRecurrenceRequestBody(),
+      body: requestBody,
     });
     state.recurrence.preview = response;
+    state.recurrence.previewSignature = buildRecurrencePreviewSignature(requestBody);
     renderTargetSummary("recurrence");
+    renderRecurrenceInfoPanel();
     renderRecurrencePreview(response);
     showNotice("Previsao da recorrencia carregada.", "success");
   } catch (error) {
     state.recurrence.preview = null;
+    state.recurrence.previewSignature = "";
     renderTargetSummary("recurrence");
+    renderRecurrenceInfoPanel();
     renderRecurrencePreview(null);
     showNotice(error.message, "error");
+  } finally {
+    setBusy(button, false);
+  }
+}
+
+async function previewRecurrenceEdit() {
+  const button = $("#previewRecurrenceEditBtn");
+  setBusy(button, true, "Calculando...");
+  hideRecurrenceEditNotice();
+  clearFieldValidation();
+  try {
+    if (!validateRecurrenceEditForm()) return;
+    const requestBody = buildRecurrenceEditRequestBody();
+    const response = await apiFetch("/api/announcement-recurrences/preview", {
+      method: "POST",
+      body: requestBody,
+    });
+    state.recurrenceEdit.preview = response;
+    state.recurrenceEdit.previewSignature = buildRecurrencePreviewSignature(requestBody);
+    renderRecurrenceEditInfoPanel();
+    renderRecurrenceEditPreview(response);
+    showRecurrenceEditNotice("Impacto da edicao carregado com sucesso.", "success");
+  } catch (error) {
+    state.recurrenceEdit.preview = null;
+    state.recurrenceEdit.previewSignature = "";
+    renderRecurrenceEditInfoPanel();
+    renderRecurrenceEditPreview(null);
+    showRecurrenceEditNotice(error.message, "error");
   } finally {
     setBusy(button, false);
   }
@@ -2598,11 +3329,13 @@ async function previewEngagementTargets() {
     state.engagement.preview = response;
     renderTargetSummary("engagement");
     renderEngagementPreview(response);
+    updateEngagementMessagePreview();
     showNotice("Quantidade de alunos inativos por turma carregada com sucesso.", "success");
   } catch (error) {
     state.engagement.preview = null;
     renderTargetSummary("engagement");
     renderEngagementPreview(null);
+    updateEngagementMessagePreview();
     showNotice(error.message, "error");
   } finally {
     setBusy(button, false);
@@ -2617,6 +3350,7 @@ function updateAnnouncementPreview() {
   const previewCourse = firstTargetCourse("announcement");
   const titlePreview = $("#announcementPreviewTitle");
   const renderedTitle = renderCourseTemplate($("#announcementTitle").value.trim() || "Titulo do comunicado", previewCourse);
+  renderAnnouncementInfoPanel();
   if (titlePreview) {
     titlePreview.textContent = previewCourse
       ? `${renderedTitle} | amostra com ${previewCourse.course_name || previewCourse.course_ref}`
@@ -2632,6 +3366,7 @@ function updateMessagePreview() {
   const previewCourse = firstTargetCourse("message");
   const previewRecipient = firstMessagePreviewRecipient();
   renderTemplateStatus("message");
+  renderMessageInfoPanel();
   if (!previewCourse) {
     preview.classList.add("empty-state");
     preview.innerHTML = "Selecione uma turma para gerar a amostra da caixa de entrada.";
@@ -2664,6 +3399,8 @@ function updateRecurrenceSamplePreview() {
   if (!preview) return;
   const previewCourse = firstTargetCourse("recurrence");
   renderTemplateStatus("recurrence");
+  renderRecurrenceInfoPanel();
+  renderRecurrencePreviewState();
   if (!previewCourse) {
     preview.classList.add("empty-state");
     preview.innerHTML = "Selecione as turmas para gerar a amostra da recorrencia.";
@@ -2681,6 +3418,72 @@ function updateRecurrenceSamplePreview() {
   `;
 }
 
+function updateRecurrenceEditSamplePreview() {
+  const preview = $("#recurrenceEditMessagePreview");
+  if (!preview) return;
+  const previewCourse = firstTargetCourse("recurrenceEdit");
+  renderTemplateStatus("recurrenceEdit");
+  renderRecurrenceEditInfoPanel();
+  renderRecurrenceEditPreviewState();
+  if (!previewCourse) {
+    preview.classList.add("empty-state");
+    preview.innerHTML = "Selecione as turmas para gerar a amostra da edicao.";
+    return;
+  }
+  preview.classList.remove("empty-state");
+  const renderedTitle = renderCourseTemplate($("#recurrenceEditTitle").value.trim() || "Titulo da recorrencia", previewCourse);
+  const renderedBody = renderCourseTemplate($("#recurrenceEditMessage").value.trim() || "<p></p>", previewCourse);
+  preview.innerHTML = `
+    <div class="message-preview-block">
+      <strong>${escapeHtml(renderedTitle)}</strong>
+      <div class="compact-meta">Amostra com ${escapeHtml(previewCourse.course_name || previewCourse.course_ref || "-")}</div>
+    </div>
+    <div class="message-preview-block message-preview-html">${renderedBody}</div>
+  `;
+}
+
+function updateEngagementMessagePreview() {
+  const preview = $("#engagementMessagePreview");
+  if (!preview) return;
+  renderTemplateStatus("engagement");
+  const sampleRecipient = firstEngagementPreviewRecipient();
+  const sampleCourse = sampleRecipient
+    ? findCourseByRef(sampleRecipient.course_ref || sampleRecipient.course_id)
+    : firstTargetCourse("engagement");
+  if (!sampleCourse) {
+    preview.classList.add("empty-state");
+    preview.innerHTML = "Selecione as turmas, carregue o alvo e gere a amostra da mensagem para inativos.";
+    return;
+  }
+  preview.classList.remove("empty-state");
+  const sampleReason = sampleRecipient?.reasons_label || "Motivo identificado no filtro";
+  const renderedSubject = renderCourseTemplate(
+    $("#engagementSubject").value.trim() || "Acompanhamento de acesso ao curso",
+    sampleCourse,
+    {
+      student_name: sampleRecipient?.student_name || "Nome do aluno",
+      reason: sampleReason,
+    },
+  );
+  const renderedBody = escapeHtml(
+    renderCourseTemplate(
+      $("#engagementMessage").value.trim() || "Ola {{student_name}}, estamos acompanhando sua atividade no curso {{course_name}}.",
+      sampleCourse,
+      {
+        student_name: sampleRecipient?.student_name || "Nome do aluno",
+        reason: sampleReason,
+      },
+    ),
+  ).replaceAll("\n", "<br>");
+  preview.innerHTML = `
+    <div class="message-preview-block">
+      <strong>${escapeHtml(renderedSubject)}</strong>
+      <div class="compact-meta">Amostra com ${escapeHtml(sampleRecipient?.student_name || "Nome do aluno")} | ${escapeHtml(sampleCourse.course_name || sampleCourse.course_ref || "-")} | ${escapeHtml(sampleReason)}</div>
+    </div>
+    <div class="message-preview-block message-preview-html">${renderedBody}</div>
+  `;
+}
+
 function updateAttachmentMeta(event) {
   const input = event?.target;
   if (!input) return;
@@ -2689,11 +3492,13 @@ function updateAttachmentMeta(event) {
     $("#announcementAttachmentMeta").textContent = file
       ? `${file.name} | ${formatFileSize(file.size)}`
       : "O Canvas aceita o anexo direto na criacao do comunicado.";
+    renderAnnouncementInfoPanel();
   }
   if (input.id === "messageAttachment") {
     $("#messageAttachmentMeta").textContent = file
       ? `${file.name} | ${formatFileSize(file.size)}`
       : "O arquivo sera enviado para o Canvas e reaproveitado no lote da caixa de entrada.";
+    renderMessageInfoPanel();
   }
 }
 
@@ -2720,11 +3525,26 @@ function firstMessagePreviewRecipient() {
   return state.message.previewRecipients?.[0] || null;
 }
 
+function firstEngagementPreviewRecipient() {
+  return state.engagement.preview?.items?.[0] || null;
+}
+
+function findCourseByRef(ref) {
+  if (!ref) return null;
+  const normalized = String(ref);
+  const fromRegistered = state.registeredCourses.find((course) => String(course.course_ref) === normalized);
+  if (fromRegistered) return fromRegistered;
+  const fromGroups = state.groups.flatMap((group) => group.courses || []).find((course) => String(course.course_ref) === normalized);
+  if (fromGroups) return fromGroups;
+  return state.engagement.preview?.courses?.find((course) => String(course.course_ref || course.course_id) === normalized) || null;
+}
+
 function renderCourseTemplate(template, course, extraContext = {}) {
   const context = {
     course_name: course?.course_name || "Nome da disciplina",
     course_ref: course?.course_ref || "0000",
     course_code: course?.course_code || "CURSO000",
+    reason: "Motivo identificado",
     ...extraContext,
   };
   let rendered = String(template || "");
@@ -2889,31 +3709,83 @@ async function executeEngagementJob() {
 async function submitRecurrence(event) {
   event.preventDefault();
   const button = $("#recurrenceForm button[type='submit']");
-  setBusy(button, true, state.recurrence.editingId ? "Salvando..." : "Criando...");
   hideNotice();
   clearFieldValidation();
   try {
     if (!validateRecurrenceForm()) return;
-    const isEditing = Boolean(state.recurrence.editingId);
-    const response = await apiFetch(
-      isEditing ? `/api/announcement-recurrences/${state.recurrence.editingId}` : "/api/announcement-recurrences",
-      {
-        method: isEditing ? "PUT" : "POST",
-        body: buildRecurrenceRequestBody(),
-      },
-    );
-    state.recurrence.preview = null;
-    state.recurrence.editingId = null;
+    const requestBody = buildRecurrenceRequestBody();
+    if (!recurrencePreviewIsCurrent("recurrence", requestBody)) {
+      showNotice("Clique em prever datas novamente antes de criar a recorrencia. A revisao precisa estar atualizada.", "error");
+      focusField("#previewRecurrenceBtn");
+      return;
+    }
+    openRecurrenceReviewModal("create", requestBody, state.recurrence.preview);
+  } catch (error) {
+    showNotice(error.message, "error");
+  }
+}
+
+async function submitRecurrenceEdit(event) {
+  event.preventDefault();
+  hideRecurrenceEditNotice();
+  clearFieldValidation();
+  try {
+    if (!validateRecurrenceEditForm()) return;
+    const requestBody = buildRecurrenceEditRequestBody();
+    if (!recurrencePreviewIsCurrent("recurrenceEdit", requestBody)) {
+      showRecurrenceEditNotice("Clique em prever impacto novamente antes de salvar. A revisao precisa estar atualizada.", "error");
+      focusField("#previewRecurrenceEditBtn");
+      return;
+    }
+    openRecurrenceReviewModal("edit", requestBody, state.recurrenceEdit.preview);
+  } catch (error) {
+    showRecurrenceEditNotice(error.message, "error");
+  }
+}
+
+async function confirmRecurrenceReview() {
+  const button = $("#confirmRecurrenceReviewBtn");
+  setBusy(button, true, state.recurrenceReview.mode === "edit" ? "Salvando..." : "Criando...");
+  hideRecurrenceReviewNotice();
+  try {
+    const { mode, payload } = state.recurrenceReview;
+    if (!mode || !payload) {
+      closeRecurrenceReviewModal();
+      return;
+    }
+    if (mode === "create") {
+      const response = await apiFetch("/api/announcement-recurrences", {
+        method: "POST",
+        body: payload,
+      });
+      state.recurrence.preview = null;
+      state.recurrence.previewSignature = "";
+      await loadConfig();
+      renderAll();
+      closeRecurrenceReviewModal();
+      showNotice(
+        `Recorrencia criada com ${response.created_count || 0} aviso(s) agendado(s) no Canvas.`,
+        response.failure_count ? "info" : "success",
+      );
+      return;
+    }
+    const recurrenceId = payload.recurrence_id;
+    const response = await apiFetch(`/api/announcement-recurrences/${recurrenceId}`, {
+      method: "PUT",
+      body: payload,
+    });
+    state.recurrenceEdit.preview = null;
+    state.recurrenceEdit.previewSignature = "";
     await loadConfig();
     renderAll();
+    closeRecurrenceReviewModal();
+    closeRecurrenceEditModal();
     showNotice(
-      isEditing
-        ? `Recorrencia atualizada. ${response.created_count || 0} aviso(s) futuro(s) recriado(s) no Canvas.`
-        : `Recorrencia criada com ${response.created_count || 0} aviso(s) agendado(s) no Canvas.`,
+      `Recorrencia atualizada. ${response.created_count || 0} aviso(s) futuro(s) criado(s) e ${response.replaced_count || 0} ajustado(s).`,
       response.failure_count ? "info" : "success",
     );
   } catch (error) {
-    showNotice(error.message, "error");
+    showRecurrenceReviewNotice(error.message, "error");
   } finally {
     setBusy(button, false);
   }
@@ -3259,6 +4131,78 @@ function metricCard(label, value, comparison = null, helper = "") {
   return `<div class="overview-card"><span>${escapeHtml(label)}</span><strong>${escapeHtml(String(value))}</strong>${helperHtml}${comparisonHtml}</div>`;
 }
 
+function timelinePill(label, value, tone = "default") {
+  if (!value) return "";
+  return `<span class="timeline-pill ${escapeHtml(tone)}">${escapeHtml(label)}: ${escapeHtml(formatDateTime(value))}</span>`;
+}
+
+function recurrenceStatusLabel(item) {
+  if (item.last_error || Number(item.error_items || 0) > 0) return "Com alerta";
+  if (!item.is_active && (item.canceled_at || Number(item.canceled_items || 0) > 0)) return "Cancelada";
+  if (!item.is_active) return "Inativa";
+  if (Number(item.future_items || 0) > 0) return "Ativa";
+  return "Sem futuros";
+}
+
+function recurrenceChangeLabel(item) {
+  const createdAt = parseDateSafe(item.created_at);
+  const updatedAt = parseDateSafe(item.updated_at);
+  if (createdAt && updatedAt && Math.abs(updatedAt.getTime() - createdAt.getTime()) < 60_000 && isRecentWithinDays(createdAt, 3)) {
+    return "Nova recorrencia";
+  }
+  if (updatedAt && createdAt && updatedAt.getTime() - createdAt.getTime() >= 60_000 && isRecentWithinDays(updatedAt, 3)) {
+    return "Ajustada recentemente";
+  }
+  return "";
+}
+
+function parseDateSafe(value) {
+  if (!value) return null;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function isRecentWithinDays(value, days) {
+  const parsed = value instanceof Date ? value : parseDateSafe(value);
+  if (!parsed) return false;
+  const now = new Date();
+  const threshold = now.getTime() - Number(days || 0) * 24 * 60 * 60 * 1000;
+  return parsed.getTime() >= threshold;
+}
+
+function dayOffsetFromNow(value) {
+  const parsed = parseDateSafe(value);
+  if (!parsed) return 0;
+  const now = new Date();
+  const startNow = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const startTarget = new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate());
+  return Math.round((startTarget.getTime() - startNow.getTime()) / (24 * 60 * 60 * 1000));
+}
+
+function classifyAgendaDay(value) {
+  const offset = dayOffsetFromNow(value);
+  if (offset <= 0) return "today";
+  if (offset === 1) return "tomorrow";
+  if (offset <= 6) return "week";
+  return "future";
+}
+
+function formatRelativeAgendaDay(value) {
+  const offset = dayOffsetFromNow(value);
+  if (offset <= 0) return "Hoje";
+  if (offset === 1) return "Amanha";
+  if (offset === 2) return "Em 2 dias";
+  if (offset <= 6) return `Em ${offset} dias`;
+  if (offset <= 13) return "Na proxima semana";
+  return `Em ${offset} dias`;
+}
+
+function formatAgendaGroupLabel(date, formatter, dayOffset) {
+  if (dayOffset <= 0) return `Hoje | ${formatter.format(date)}`;
+  if (dayOffset === 1) return `Amanha | ${formatter.format(date)}`;
+  return formatter.format(date);
+}
+
 function deltaPill(delta, deltaPercent = null) {
   const numericDelta = Number(delta || 0);
   const direction = numericDelta > 0 ? "up" : numericDelta < 0 ? "down" : "flat";
@@ -3526,6 +4470,22 @@ function formatLocalDateTimeInput(value) {
   const hours = String(date.getHours()).padStart(2, "0");
   const minutes = String(date.getMinutes()).padStart(2, "0");
   return `${year}-${month}-${day}T${hours}:${minutes}`;
+}
+
+function formatLocalDateTimeLabel(value) {
+  if (!value) return "-";
+  const isoValue = String(value).includes("T") && !String(value).includes("Z")
+    ? `${value}:00`
+    : value;
+  const date = new Date(isoValue);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString("pt-BR", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 function formatEnvTokenSource(value) {

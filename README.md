@@ -40,6 +40,28 @@ Painel web local para operar em lote no Canvas LMS usando apenas endpoints ofici
 8. `Relatorios`
    historico, analitico comparativo e download de CSV
 
+## Fluxos refinados da interface
+
+### Comunicados
+
+- resumo operacional do lote antes do envio
+- preview com placeholders por disciplina
+- revisao final antes de enfileirar
+
+### Caixa de entrada
+
+- resumo operacional com estrategia final, deduplicacao e anexo
+- indica quando `{{student_name}}` força personalizacao por aluno
+- revisao final antes de enfileirar
+
+### Recorrencia
+
+- criacao no formulario principal
+- edicao em modal separado
+- preview obrigatorio e revisao final antes de criar ou salvar
+- agenda das proximas publicacoes
+- lista com filtros por status e linha temporal
+
 ## Revisao antes do envio
 
 Antes de disparar um lote real, o painel abre uma revisao com:
@@ -55,6 +77,12 @@ Isso vale para:
 - `Comunicados`
 - `Caixa de entrada`
 - `Inativos`
+
+No modulo `Recorrencia`, o fluxo tambem ficou protegido:
+
+- o preview precisa estar atualizado
+- qualquer mudanca em turmas, datas ou conteudo invalida o preview anterior
+- antes de criar ou salvar, o painel abre uma revisao final com o impacto esperado
 
 ## Blocos de variaveis
 
@@ -99,10 +127,18 @@ Em vez de depender de um scheduler local, ele:
 
 O fluxo recomendado e:
 
-1. cancelar a recorrencia atual
-2. carregar essa recorrencia como base no formulario
-3. ajustar data, intervalo ou quantidade
-4. criar a nova recorrencia
+1. abrir `Editar` na recorrencia
+2. ajustar turmas, datas, intervalo ou quantidade no modal
+3. clicar em `Prever impacto`
+4. revisar o que entra, sai ou continua
+5. salvar a edicao
+
+Se a mudanca for total e voce preferir recomecar:
+
+1. usar `Duplicar base`
+2. ajustar a configuracao no formulario principal
+3. prever datas
+4. criar uma nova recorrencia
 
 ## O modulo Inativos
 
@@ -406,6 +442,28 @@ node --check static\js\app.js
 pytest
 ```
 
+### Auditoria de interface
+
+Suite de UI com screenshots, navegacao em todas as abas e varredura de acessibilidade nos modais principais:
+
+```powershell
+npm install
+npx playwright install chromium
+npm run ui:audit
+```
+
+Arquivos gerados:
+
+- relatorio HTML: `ui-audit/report/html/index.html`
+- resumo consolidado: `ui-audit/report/summary.json`
+- plano de acao: `docs/ui_audit_action_plan.md`
+
+Importante:
+
+- a auditoria usa mocks de API em `ui-audit/tests`
+- ela nao envia nada para o Canvas real
+- o app sobe isolado em `http://127.0.0.1:5070`
+
 ## Empacotamento
 
 Build local com PyInstaller:
@@ -419,15 +477,19 @@ Build local com PyInstaller:
 ```text
 Canva_Api/
 |-- app.py
+|-- CHANGELOG.md
 |-- README.md
 |-- .env.example
 |-- panel.bat
 |-- panel.ps1
 |-- build.ps1
+|-- package.json
+|-- playwright.config.js
 |-- requirements.txt
 |-- requirements-dev.txt
 |-- docs/
-|   `-- database_erd.md
+|   |-- database_erd.md
+|   `-- ui_audit_action_plan.md
 |-- src/
 |   |-- app_factory.py
 |   |-- config.py
@@ -441,6 +503,9 @@ Canva_Api/
 |   |-- css/
 |   `-- js/
 |-- templates/
+|-- ui-audit/
+|   |-- .env.ui
+|   `-- tests/
 |-- data/
 `-- logs/
 ```
