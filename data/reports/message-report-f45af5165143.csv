@@ -1,2 +1,0 @@
-﻿course_ref,course_id,course_name,strategy_requested,strategy_used,students_found,manual_matches,duplicates_skipped,recipients_targeted,recipients_sent,batch_count,status,conversation_ids,dry_run,messageable_context,manual_recipients,error
-33956,33956,INTRODUCAO A CIENCIA DE DADOS,users,users,35,1,0,1,1,1,success,1294314,False,True,True,

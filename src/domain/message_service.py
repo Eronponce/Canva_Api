@@ -93,10 +93,26 @@ class MessageService:
         if manual_recipients and not selected_user_ids:
             raise ValueError("Selecione pelo menos um destinatario manual para a caixa de entrada.")
 
+        effective_strategy = requested_strategy
         client = self.connection_service.build_client(payload)
         user = client.get_current_user()
+        self.job_manager.update_metadata(
+            job_id,
+            base_url=payload.get("base_url") or "",
+            request_payload={
+                key: value
+                for key, value in payload.items()
+                if key not in {"access_token", "api_token"}
+            },
+            request_token_source="inline" if (payload.get("access_token") or payload.get("api_token")) else self.connection_service.app_config.default_token_source,
+            requested_strategy=requested_strategy,
+            effective_strategy=effective_strategy,
+            dry_run=dry_run,
+            dedupe=dedupe,
+            canvas_user_id=user.get("id"),
+            canvas_user_name=user.get("name") or user.get("short_name") or "",
+        )
 
-        effective_strategy = requested_strategy
         if requested_strategy == "context" and (dedupe or manual_recipients):
             effective_strategy = "users"
             self.job_manager.add_log(
@@ -108,6 +124,7 @@ class MessageService:
                     "manual_recipients": manual_recipients,
                 },
             )
+            self.job_manager.update_metadata(job_id, effective_strategy=effective_strategy)
 
         total_steps = max(len(course_refs) * 2, 1)
         self.job_manager.mark_running(

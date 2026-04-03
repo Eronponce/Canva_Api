@@ -4,8 +4,20 @@ from datetime import UTC, datetime
 from zoneinfo import ZoneInfo
 
 
+def utc_now() -> datetime:
+    return datetime.now(UTC).replace(microsecond=0)
+
+
 def utc_now_iso() -> str:
-    return datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    return utc_now().isoformat().replace("+00:00", "Z")
+
+
+def datetime_to_iso(value: datetime | None) -> str | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=UTC)
+    return value.replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
 def parse_schedule_datetime(schedule_local: str, client_timezone: str | None) -> str | None:

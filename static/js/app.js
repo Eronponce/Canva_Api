@@ -4,13 +4,21 @@ const state = {
   config: null,
   groups: [],
   registeredCourses: [],
+  courseCatalog: [],
+  courseCatalogSelection: [],
   history: [],
+  reportAnalytics: null,
+  reportDays: 30,
   connectionSnapshot: null,
   envLoaded: false,
   envContent: "",
+  envVisible: false,
+  envRevealTimer: null,
   activeGroupId: null,
+  groupModalCourseRefs: [],
   selectedReportId: null,
   pickerSearch: {},
+  pickerReorder: {},
   announcement: {
     mode: "groups",
     groupIds: [],
@@ -64,7 +72,15 @@ function bindEvents() {
       addRegisteredCourse();
     }
   });
+  $("#courseCatalogSearchInput").addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      loadCourseCatalog();
+    }
+  });
   $("#addRegisteredCourseBtn").addEventListener("click", addRegisteredCourse);
+  $("#loadCourseCatalogBtn").addEventListener("click", loadCourseCatalog);
+  $("#registerCatalogSelectionBtn").addEventListener("click", registerSelectedCatalogCourses);
   $("#registeredCourseList").addEventListener("click", handleRegisteredCourseClick);
 
   $("#newGroupBtn").addEventListener("click", () => openGroupModal());
@@ -98,6 +114,8 @@ function bindEvents() {
   document.addEventListener("click", handleDelegatedClick);
   document.addEventListener("input", handleDelegatedInput);
   document.addEventListener("change", handleDelegatedChange);
+  document.addEventListener("focusin", handleDelegatedFocusIn);
+  document.addEventListener("focusout", handleDelegatedFocusOut);
 
   $("#publishMode").addEventListener("change", () => {
     toggleScheduleField();
@@ -121,7 +139,15 @@ function bindEvents() {
   $("#messageForm").addEventListener("submit", submitMessageJob);
 
   $("#refreshHistoryBtn").addEventListener("click", refreshReports);
+  $("#refreshAnalyticsBtn").addEventListener("click", refreshReports);
+  $("#reportDaysSelect").addEventListener("change", async () => {
+    state.reportDays = Number($("#reportDaysSelect").value || 30);
+    persistUiState();
+    await refreshReports();
+  });
+  $("#revealEnvBtn").addEventListener("click", revealEnvFileTemporarily);
   $("#saveEnvBtn").addEventListener("click", saveEnvFile);
+  $("#wipeDatabaseBtn").addEventListener("click", wipeDatabase);
 }
 
 function handleDelegatedClick(event) {
@@ -158,13 +184,36 @@ function handleDelegatedInput(event) {
 function handleDelegatedChange(event) {
   const checkbox = event.target.closest("[data-picker-checkbox]");
   if (!checkbox) return;
-  togglePickerValue(checkbox.dataset.pickerCheckbox, checkbox.value, checkbox.checked);
+  togglePickerValue(checkbox.dataset.pickerCheckbox, checkbox.value, checkbox.checked, { deferRender: true });
+}
+
+function handleDelegatedFocusIn(event) {
+  const root = event.target.closest("[data-picker-root]");
+  if (!root) return;
+  const pickerId = root.dataset.pickerRoot;
+  state.pickerReorder[pickerId] = false;
+}
+
+function handleDelegatedFocusOut(event) {
+  const root = event.target.closest("[data-picker-root]");
+  if (!root) return;
+  const pickerId = root.dataset.pickerRoot;
+  const nextFocused = event.relatedTarget instanceof Element ? event.relatedTarget : null;
+  if (nextFocused && root.contains(nextFocused)) {
+    return;
+  }
+  window.setTimeout(() => {
+    const pickerRoot = document.querySelector(`#${pickerId} [data-picker-root="${pickerId}"]`);
+    if (!pickerRoot) return;
+    if (pickerRoot.contains(document.activeElement)) return;
+    state.pickerReorder[pickerId] = true;
+    rerenderPickerById(pickerId);
+  }, 40);
 }
 
 function restoreUiState() {
   try {
     const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
-    $("#baseUrl").value = saved.baseUrl || "";
     $("#tokenType").value = saved.tokenType || "personal";
     $("#announcementTitle").value = saved.announcementTitle || "";
     $("#announcementMessage").value = saved.announcementMessage || "";
@@ -177,6 +226,10 @@ function restoreUiState() {
     $("#messageStrategy").value = saved.messageStrategy || "users";
     $("#messageDedupe").checked = saved.messageDedupe !== false;
     $("#messageDryRun").checked = Boolean(saved.messageDryRun);
+    state.reportDays = Number(saved.reportDays || 30);
+    if ($("#reportDaysSelect")) {
+      $("#reportDaysSelect").value = String(state.reportDays);
+    }
     state.announcement = { ...state.announcement, ...(saved.announcement || {}) };
     state.message = { ...state.message, ...(saved.message || {}) };
     if (!["groups", "courses"].includes(state.message.mode)) {
@@ -196,7 +249,6 @@ function persistUiState() {
     STORAGE_KEY,
     JSON.stringify({
       activeTab,
-      baseUrl: $("#baseUrl").value.trim(),
       tokenType: $("#tokenType").value,
       announcementTitle: $("#announcementTitle").value,
       announcementMessage: $("#announcementMessage").value,
@@ -209,6 +261,7 @@ function persistUiState() {
       messageStrategy: $("#messageStrategy").value,
       messageDedupe: $("#messageDedupe").checked,
       messageDryRun: $("#messageDryRun").checked,
+      reportDays: state.reportDays,
       announcement: state.announcement,
       message: {
         mode: state.message.mode,
@@ -227,8 +280,8 @@ function openTab(tabName) {
   document.querySelectorAll(".tab-panel").forEach((panel) => {
     panel.classList.toggle("active", panel.id === `tab-${tabName}`);
   });
-  if (tabName === "settings") {
-    loadEnvFile(true);
+  if (tabName !== "settings") {
+    hideEnvFile();
   }
   persistUiState();
 }
@@ -262,14 +315,15 @@ function focusField(selector) {
 function ensureConnectionConfigured() {
   clearFieldValidation();
   const baseUrl = normalizeBaseUrlInput($("#baseUrl").value);
+  const effectiveBaseUrl = baseUrl || normalizeBaseUrlInput(state.config?.default_base_url || "");
   const accessToken = $("#apiToken").value.trim();
   const envTokenAvailable = Boolean(state.config?.env_token_available);
 
-  if (!baseUrl) {
+  if (!effectiveBaseUrl) {
     openTab("connection");
     markInvalid("#baseUrl");
     focusField("#baseUrl");
-    showNotice("Informe a URL base do Canvas antes de continuar.", "error");
+    showNotice("Informe a URL base do Canvas ou configure a `CANVAS_BASE_URL` no `.env`.", "error");
     return false;
   }
 
@@ -363,6 +417,7 @@ async function loadInitialData() {
   hideNotice();
   await loadConfig();
   await loadHistory();
+  await loadAnalytics();
   renderConnectionResult(null);
   renderAll();
 }
@@ -372,9 +427,7 @@ async function loadConfig() {
   state.config = data.settings || {};
   state.groups = Array.isArray(data.groups) ? data.groups : [];
   state.registeredCourses = Array.isArray(data.registered_courses) ? data.registered_courses : [];
-  if (!$("#baseUrl").value.trim() && state.config.default_base_url) {
-    $("#baseUrl").value = state.config.default_base_url;
-  }
+  syncCatalogWithRegisteredCourses();
   pruneSelections();
 }
 
@@ -386,11 +439,17 @@ async function loadHistory() {
   }
 }
 
+async function loadAnalytics() {
+  const params = new URLSearchParams({ days: String(state.reportDays || 30) });
+  state.reportAnalytics = await apiFetch(`/api/reports/analytics?${params.toString()}`);
+}
+
 async function refreshReports() {
   hideNotice();
   try {
     await loadConfig();
     await loadHistory();
+    await loadAnalytics();
     renderAll();
     showNotice("Relatorios atualizados.", "success");
   } catch (error) {
@@ -405,6 +464,12 @@ function pruneSelections() {
   const validCourseRefs = new Set(state.registeredCourses.map((item) => item.course_ref));
   state.announcement.courseRefs = state.announcement.courseRefs.filter((ref) => validCourseRefs.has(ref));
   state.message.courseRefs = state.message.courseRefs.filter((ref) => validCourseRefs.has(ref));
+  const selectableCatalogRefs = new Set(
+    state.courseCatalog
+      .filter((item) => !item.already_registered)
+      .map((item) => String(item.course_ref || item.id)),
+  );
+  state.courseCatalogSelection = state.courseCatalogSelection.filter((ref) => selectableCatalogRefs.has(ref));
 }
 
 function renderAll() {
@@ -415,8 +480,10 @@ function renderAll() {
   renderModeSwitch("message");
   renderTargetControls("announcement");
   renderTargetControls("message");
+  renderCatalogCourseSummary();
   renderReports();
   renderSettingsInfo(state.config || {});
+  renderEnvEditorState();
   renderConnectionResult(state.connectionSnapshot);
   persistUiState();
 }
@@ -495,6 +562,27 @@ function renderRegisteredCourses() {
   `).join("");
 }
 
+function renderCatalogCourseSummary() {
+  const summary = $("#courseCatalogSummary");
+  const picker = $("#courseCatalogPicker");
+  if (!summary || !picker) return;
+
+  const selectedCount = state.courseCatalogSelection.length;
+  const availableCount = state.courseCatalog.filter((item) => !item.already_registered).length;
+  const alreadyRegisteredCount = state.courseCatalog.filter((item) => item.already_registered).length;
+
+  summary.innerHTML = `
+    <div class="summary-card"><span>Catalogo carregado</span><strong>${escapeHtml(String(state.courseCatalog.length))}</strong></div>
+    <div class="summary-card"><span>Disponiveis</span><strong>${escapeHtml(String(availableCount))}</strong></div>
+    <div class="summary-card"><span>Ja cadastrados</span><strong>${escapeHtml(String(alreadyRegisteredCount))}</strong></div>
+    <div class="summary-card"><span>Selecionados</span><strong>${escapeHtml(String(selectedCount))}</strong></div>
+  `;
+
+  if (!state.courseCatalog.length) {
+    picker.innerHTML = `<div class="picker-empty">Clique em "Buscar no Canvas" para carregar os cursos que voce tem acesso.</div>`;
+  }
+}
+
 async function addRegisteredCourse() {
   const button = $("#addRegisteredCourseBtn");
   setBusy(button, true, "Buscando...");
@@ -524,6 +612,62 @@ async function addRegisteredCourse() {
   }
 }
 
+async function loadCourseCatalog() {
+  const button = $("#loadCourseCatalogBtn");
+  setBusy(button, true, "Buscando...");
+  hideNotice();
+  clearFieldValidation();
+  try {
+    if (!ensureConnectionConfigured()) return;
+    const response = await apiFetch("/api/courses/catalog", {
+      method: "POST",
+      body: {
+        ...getConnectionPayload(),
+        search_term: $("#courseCatalogSearchInput").value.trim(),
+      },
+    });
+    state.courseCatalog = Array.isArray(response.items) ? response.items : [];
+    syncCatalogWithRegisteredCourses();
+    renderAll();
+    showNotice(`${response.total_found || state.courseCatalog.length} curso(s) carregado(s) do Canvas.`, "success");
+  } catch (error) {
+    showNotice(error.message, "error");
+  } finally {
+    setBusy(button, false);
+  }
+}
+
+async function registerSelectedCatalogCourses() {
+  const button = $("#registerCatalogSelectionBtn");
+  setBusy(button, true, "Cadastrando...");
+  hideNotice();
+  clearFieldValidation();
+  try {
+    if (!ensureConnectionConfigured()) return;
+    if (!state.courseCatalogSelection.length) {
+      showNotice("Selecione pelo menos um curso do catalogo para cadastrar.", "error");
+      return;
+    }
+    const response = await apiFetch("/api/registered-courses/bulk", {
+      method: "POST",
+      body: {
+        ...getConnectionPayload(),
+        course_refs: state.courseCatalogSelection,
+      },
+    });
+    await loadConfig();
+    renderAll();
+    showNotice(
+      `${response.created_count || 0} curso(s) novo(s) cadastrado(s) e ${response.updated_count || 0} atualizado(s).`,
+      "success",
+    );
+  } catch (error) {
+    showNotice(error.message, "error");
+  } finally {
+    setBusy(button, false);
+  }
+}
+
 async function handleRegisteredCourseClick(event) {
   const button = event.target.closest("[data-action='delete-course']");
   if (!button) return;
@@ -535,6 +679,17 @@ async function handleRegisteredCourseClick(event) {
   } catch (error) {
     showNotice(error.message, "error");
   }
+}
+
+function syncCatalogWithRegisteredCourses() {
+  if (!state.courseCatalog.length) return;
+  const registeredRefs = new Set(state.registeredCourses.map((item) => item.course_ref));
+  state.courseCatalog = state.courseCatalog.map((item) => ({
+    ...item,
+    course_ref: String(item.course_ref || item.id || ""),
+    already_registered: registeredRefs.has(String(item.course_ref || item.id || "")),
+  }));
+  state.courseCatalogSelection = state.courseCatalogSelection.filter((ref) => !registeredRefs.has(ref));
 }
 
 function renderGroups() {
@@ -586,10 +741,11 @@ async function handleGroupClick(event) {
 
 function openGroupModal(group = null) {
   state.activeGroupId = group?.id || null;
+  state.groupModalCourseRefs = [...(group?.course_refs || [])];
   $("#groupModalTitle").textContent = group ? `Editar grupo: ${group.name}` : "Novo grupo";
   $("#groupName").value = group?.name || "";
   $("#groupDescription").value = group?.description || "";
-  renderPicker("groupCoursePicker", coursePickerItems(), group?.course_refs || []);
+  renderPicker("groupCoursePicker", coursePickerItems(), state.groupModalCourseRefs);
   hideModalNotice();
   $("#groupModal").classList.remove("hidden");
   $("#groupModal").setAttribute("aria-hidden", "false");
@@ -597,6 +753,7 @@ function openGroupModal(group = null) {
 
 function closeGroupModal() {
   state.activeGroupId = null;
+  state.groupModalCourseRefs = [];
   hideModalNotice();
   $("#groupModal").classList.add("hidden");
   $("#groupModal").setAttribute("aria-hidden", "true");
@@ -612,7 +769,7 @@ async function saveGroup() {
   try {
     const name = $("#groupName").value.trim();
     const description = $("#groupDescription").value.trim();
-    const courseRefs = selectedValues("groupCoursePicker");
+    const courseRefs = [...state.groupModalCourseRefs];
     if (!name) {
       markInvalid("#groupName");
       focusField("#groupName");
@@ -644,7 +801,7 @@ function renderModeSwitch(kind) {
   });
 }
 
-function renderTargetControls(kind) {
+function renderTargetControls(kind, options = {}) {
   const target = state[kind];
   const groupsMode = target.mode === "groups";
   const courseMode = target.mode === "courses";
@@ -652,71 +809,166 @@ function renderTargetControls(kind) {
   $(`#${kind}GroupPicker`).classList.toggle("hidden", !groupsMode);
   $(`#${kind}CoursePicker`).classList.toggle("hidden", !courseMode);
   $(`#${kind === "announcement" ? "announcementAllGroups" : "messageAllGroups"}`).checked = target.selectAllGroups;
-  renderPickers();
+  renderPickers(options);
   renderTargetSummary(kind);
   if (kind === "message") {
     renderMessageInfoPanel();
   }
 }
 
-function renderPickers() {
-  renderPicker("groupCoursePicker", coursePickerItems(), selectedValues("groupCoursePicker"));
-  renderPicker("announcementGroupPicker", groupPickerItems(), state.announcement.groupIds);
-  renderPicker("announcementCoursePicker", coursePickerItems(), state.announcement.courseRefs);
-  renderPicker("messageGroupPicker", groupPickerItems(), state.message.groupIds);
-  renderPicker("messageCoursePicker", coursePickerItems(), state.message.courseRefs);
+function renderPickers(options = {}) {
+  renderPicker("groupCoursePicker", coursePickerItems(), state.groupModalCourseRefs, {
+    preserveScroll: options.preservePickerId === "groupCoursePicker",
+  });
+  renderPicker("courseCatalogPicker", catalogCoursePickerItems(), state.courseCatalogSelection, {
+    preserveScroll: options.preservePickerId === "courseCatalogPicker",
+  });
+  renderPicker("announcementGroupPicker", groupPickerItems(), state.announcement.groupIds, {
+    preserveScroll: options.preservePickerId === "announcementGroupPicker",
+  });
+  renderPicker("announcementCoursePicker", coursePickerItems(), state.announcement.courseRefs, {
+    preserveScroll: options.preservePickerId === "announcementCoursePicker",
+  });
+  renderPicker("messageGroupPicker", groupPickerItems(), state.message.groupIds, {
+    preserveScroll: options.preservePickerId === "messageGroupPicker",
+  });
+  renderPicker("messageCoursePicker", coursePickerItems(), state.message.courseRefs, {
+    preserveScroll: options.preservePickerId === "messageCoursePicker",
+  });
+  renderCatalogCourseSummary();
 }
 
-function renderPicker(pickerId, items, selectedIds) {
+function renderPicker(pickerId, items, selectedIds, options = {}) {
   const target = $(`#${pickerId}`);
   if (!target) return;
+  const previousScrollTop = options.preserveScroll ? getPickerScrollTop(pickerId) : null;
   const searchText = state.pickerSearch[pickerId] || "";
   const selectedSet = new Set(selectedIds);
-  const filtered = items.filter((item) => item.search.includes(searchText));
+  const filtered = sortPickerItems(
+    items.filter((item) => item.search.includes(searchText)),
+    selectedSet,
+    shouldReorderSelected(pickerId),
+  );
   target.innerHTML = `
-    <div class="picker-toolbar">
-      <input type="text" data-picker-search="${pickerId}" placeholder="Buscar..." value="${escapeHtml(searchText)}">
-      <div class="picker-selected">
-        ${selectedIds.length ? selectedIds.map((value) => {
-          const item = items.find((entry) => entry.id === value);
-          return `<button class="chip" type="button" data-picker-remove="${pickerId}" data-value="${escapeHtml(value)}">${escapeHtml(item?.shortLabel || item?.label || value)} ×</button>`;
-        }).join("") : `<span class="picker-help">Nenhum item selecionado.</span>`}
+    <div class="picker-root" data-picker-root="${pickerId}">
+      <div class="picker-toolbar">
+        <input type="text" data-picker-search="${pickerId}" placeholder="Buscar..." value="${escapeHtml(searchText)}">
+        <div class="picker-selected">
+          ${selectedIds.length ? selectedIds.map((value) => {
+            const item = items.find((entry) => entry.id === value);
+            return `<button class="chip" type="button" data-picker-remove="${pickerId}" data-value="${escapeHtml(value)}">${escapeHtml(item?.shortLabel || item?.label || value)} x</button>`;
+          }).join("") : `<span class="picker-help">Nenhum item selecionado.</span>`}
+        </div>
+      </div>
+      <div class="picker-options">
+        ${filtered.length ? filtered.map((item) => `
+          <label class="picker-option ${selectedSet.has(item.id) ? "is-selected" : ""} ${item.disabled ? "is-disabled" : ""}">
+            <input type="checkbox" data-picker-checkbox="${pickerId}" value="${escapeHtml(item.id)}" ${selectedSet.has(item.id) ? "checked" : ""} ${item.disabled ? "disabled" : ""}>
+            <div>
+              <strong>${escapeHtml(item.label)}${item.badge ? ` <span class="inline-badge">${escapeHtml(item.badge)}</span>` : ""}</strong>
+              <small>${escapeHtml(item.meta || "")}</small>
+            </div>
+          </label>
+        `).join("") : `<div class="picker-empty">Nenhum item encontrado.</div>`}
       </div>
     </div>
-    <div class="picker-options">
-      ${filtered.length ? filtered.map((item) => `
-        <label class="picker-option">
-          <input type="checkbox" data-picker-checkbox="${pickerId}" value="${escapeHtml(item.id)}" ${selectedSet.has(item.id) ? "checked" : ""}>
-          <div>
-            <strong>${escapeHtml(item.label)}</strong>
-            <small>${escapeHtml(item.meta || "")}</small>
-          </div>
-        </label>
-      `).join("") : `<div class="picker-empty">Nenhum item encontrado.</div>`}
-    </div>
   `;
+  if (previousScrollTop !== null) {
+    restorePickerScrollTop(pickerId, previousScrollTop);
+  }
 }
 
-function togglePickerValue(pickerId, value, checked) {
+function rerenderPickerById(pickerId, options = {}) {
+  const pickers = {
+    groupCoursePicker: () => renderPicker("groupCoursePicker", coursePickerItems(), selectedValues("groupCoursePicker"), options),
+    courseCatalogPicker: () => renderPicker("courseCatalogPicker", catalogCoursePickerItems(), state.courseCatalogSelection, options),
+    announcementGroupPicker: () => renderPicker("announcementGroupPicker", groupPickerItems(), state.announcement.groupIds, options),
+    announcementCoursePicker: () => renderPicker("announcementCoursePicker", coursePickerItems(), state.announcement.courseRefs, options),
+    messageGroupPicker: () => renderPicker("messageGroupPicker", groupPickerItems(), state.message.groupIds, options),
+    messageCoursePicker: () => renderPicker("messageCoursePicker", coursePickerItems(), state.message.courseRefs, options),
+  };
+  pickers[pickerId]?.();
+}
+
+function getPickerScrollTop(pickerId) {
+  const options = document.querySelector(`#${pickerId} .picker-options`);
+  return options ? options.scrollTop : 0;
+}
+
+function restorePickerScrollTop(pickerId, scrollTop) {
+  window.requestAnimationFrame(() => {
+    const options = document.querySelector(`#${pickerId} .picker-options`);
+    if (options) {
+      options.scrollTop = scrollTop;
+    }
+  });
+}
+
+function shouldReorderSelected(pickerId) {
+  return state.pickerReorder[pickerId] !== false;
+}
+
+function sortPickerItems(items, selectedSet, reorderSelected) {
+  return [...items].sort((left, right) => {
+    if (reorderSelected) {
+      const leftRank = selectedSet.has(left.id) ? 0 : 1;
+      const rightRank = selectedSet.has(right.id) ? 0 : 1;
+      if (leftRank !== rightRank) {
+        return leftRank - rightRank;
+      }
+    }
+    return String(left.label || "").localeCompare(String(right.label || ""), "pt-BR", { sensitivity: "base" });
+  });
+}
+
+function togglePickerValue(pickerId, value, checked, options = {}) {
   const target = pickerTarget(pickerId);
   const nextValues = checked
     ? unique([...(target.values || []), value])
     : (target.values || []).filter((item) => item !== value);
+  state.pickerReorder[pickerId] = false;
   target.set(nextValues);
   if (target.kind) {
-    renderTargetControls(target.kind);
+    renderTargetSummary(target.kind);
+    if (target.kind === "message") {
+      renderMessageInfoPanel();
+    }
     persistUiState();
+    if (!options.deferRender) {
+      renderTargetControls(target.kind, { preservePickerId: pickerId });
+    }
     return;
   }
-  renderPicker("groupCoursePicker", coursePickerItems(), nextValues);
+  renderCatalogCourseSummary();
+  if (target.render) {
+    if (!options.deferRender) {
+      target.render(nextValues, { preserveScroll: true });
+    }
+    return;
+  }
+  rerenderPickerById(pickerId);
 }
 
 function pickerTarget(pickerId) {
   const map = {
     groupCoursePicker: {
-      values: selectedValues("groupCoursePicker"),
+      values: state.groupModalCourseRefs,
       set(next) {
-        renderPicker("groupCoursePicker", coursePickerItems(), next);
+        state.groupModalCourseRefs = next;
+      },
+      render(next, options = {}) {
+        renderPicker("groupCoursePicker", coursePickerItems(), next, options);
+      },
+    },
+    courseCatalogPicker: {
+      values: state.courseCatalogSelection,
+      set(next) {
+        state.courseCatalogSelection = next;
+        renderCatalogCourseSummary();
+      },
+      render(next, options = {}) {
+        renderCatalogCourseSummary();
+        renderPicker("courseCatalogPicker", catalogCoursePickerItems(), next, options);
       },
     },
     announcementGroupPicker: {
@@ -752,9 +1004,8 @@ function pickerTarget(pickerId) {
 }
 
 function selectedValues(pickerId) {
-  if (pickerId === "groupCoursePicker") {
-    return Array.from(document.querySelectorAll(`#${pickerId} [data-picker-checkbox]:checked`)).map((input) => input.value);
-  }
+  if (pickerId === "groupCoursePicker") return state.groupModalCourseRefs;
+  if (pickerId === "courseCatalogPicker") return state.courseCatalogSelection;
   if (pickerId === "announcementGroupPicker") return state.announcement.groupIds;
   if (pickerId === "announcementCoursePicker") return state.announcement.courseRefs;
   if (pickerId === "messageGroupPicker") return state.message.groupIds;
@@ -779,6 +1030,18 @@ function coursePickerItems() {
     shortLabel: course.course_ref,
     meta: `${course.course_ref}${course.course_code ? ` | ${course.course_code}` : ""}${course.term_name ? ` | ${course.term_name}` : ""}`,
     search: `${course.course_ref} ${course.course_name || ""} ${course.course_code || ""} ${course.term_name || ""}`.toLowerCase(),
+  }));
+}
+
+function catalogCoursePickerItems() {
+  return state.courseCatalog.map((course) => ({
+    id: String(course.course_ref || course.id),
+    label: course.name || `Curso ${course.course_ref || course.id}`,
+    shortLabel: String(course.course_ref || course.id),
+    meta: `${course.course_ref || course.id}${course.course_code ? ` | ${course.course_code}` : ""}${course.term_name ? ` | ${course.term_name}` : ""}`,
+    search: `${course.course_ref || course.id} ${course.name || ""} ${course.course_code || ""} ${course.term_name || ""}`.toLowerCase(),
+    disabled: Boolean(course.already_registered),
+    badge: course.already_registered ? "ja cadastrado" : "",
   }));
 }
 
@@ -999,20 +1262,43 @@ function renderJobLayout(job, columns) {
 
 function renderReports() {
   renderReportMetrics();
+  renderReportAnalytics();
   renderHistoryList();
   renderReportDetail();
 }
 
 function renderReportMetrics() {
-  const completed = state.history.filter((item) => item.status === "completed").length;
-  const failed = state.history.filter((item) => item.status === "failed").length;
-  const last = state.history[0];
+  const overview = state.reportAnalytics?.overview || {};
   $("#reportMetrics").innerHTML = [
-    metricCard("Relatorios salvos", state.history.length),
-    metricCard("Concluidos", completed),
-    metricCard("Com falha", failed),
-    metricCard("Ultimo tipo", last?.kind || "-"),
+    metricCard("Periodo", `${overview.days || state.reportDays || 30} dias`),
+    metricCard("Lotes", overview.total_jobs || 0),
+    metricCard("Taxa de sucesso", `${formatSummaryValue(overview.success_rate || 0)}%`),
+    metricCard("Duracao media", `${formatSummaryValue(overview.avg_duration_seconds || 0)}s`),
+    metricCard("Mensagens enviadas", overview.total_recipients_sent || 0),
+    metricCard("Comunicados criados", overview.total_announcements_created || 0),
   ].join("");
+}
+
+function renderReportAnalytics() {
+  const container = $("#reportAnalyticsSections");
+  const sections = state.reportAnalytics?.sections || {};
+  const entries = Object.entries(sections);
+  if (!entries.length) {
+    container.innerHTML = `<div class="empty-state">Nenhum analitico disponivel para o periodo selecionado.</div>`;
+    return;
+  }
+
+  container.innerHTML = entries.map(([key, section], index) => `
+    <details class="report-section" ${index < 2 ? "open" : ""}>
+      <summary>
+        <span>${escapeHtml(section.title || toTitle(key))}</span>
+        <span class="report-section-meta">${escapeHtml(String((section.items || []).length))} item(ns)</span>
+      </summary>
+      <div class="report-section-body">
+        ${(section.items || []).length ? renderTable(reportAnalyticsColumns(key), section.items) : `<div class="empty-state">Sem dados para esta secao.</div>`}
+      </div>
+    </details>
+  `).join("");
 }
 
 function renderHistoryList() {
@@ -1076,6 +1362,55 @@ function reportColumns(kind) {
   ];
 }
 
+function reportAnalyticsColumns(sectionKey) {
+  if (sectionKey === "operational") {
+    return [
+      { label: "Tipo", format: (row) => escapeHtml(row.kind || "-") },
+      { label: "Lotes", format: (row) => escapeHtml(String(row.jobs || 0)) },
+      { label: "Concluidos", format: (row) => escapeHtml(String(row.completed || 0)) },
+      { label: "Falhas", format: (row) => escapeHtml(String(row.failed || 0)) },
+      { label: "Dry run", format: (row) => escapeHtml(String(row.dry_run || 0)) },
+    ];
+  }
+  if (sectionKey === "daily_volume") {
+    return [
+      { label: "Data", format: (row) => escapeHtml(row.date || "-") },
+      { label: "Comunicados", format: (row) => escapeHtml(String(row.announcement || 0)) },
+      { label: "Mensagens", format: (row) => escapeHtml(String(row.message || 0)) },
+      { label: "Concluidos", format: (row) => escapeHtml(String(row.completed || 0)) },
+      { label: "Falhas", format: (row) => escapeHtml(String(row.failed || 0)) },
+    ];
+  }
+  if (sectionKey === "top_courses") {
+    return [
+      { label: "Curso", format: (row) => `${escapeHtml(row.course_name || "-")}<div class="subtle mono">${escapeHtml(String(row.course_ref || "-"))}</div>` },
+      { label: "Execucoes", format: (row) => escapeHtml(String(row.runs || 0)) },
+      { label: "Sucesso", format: (row) => escapeHtml(String(row.success || 0)) },
+      { label: "Falha", format: (row) => escapeHtml(String(row.failure || 0)) },
+      { label: "Mensagens", format: (row) => escapeHtml(String(row.recipients_sent || 0)) },
+      { label: "Comunicados", format: (row) => escapeHtml(String(row.announcements || 0)) },
+    ];
+  }
+  if (sectionKey === "top_groups") {
+    return [
+      { label: "Grupo", format: (row) => `${escapeHtml(row.group_name || "-")}<div class="subtle mono">${escapeHtml(String(row.group_id || "-"))}</div>` },
+      { label: "Execucoes", format: (row) => escapeHtml(String(row.jobs || 0)) },
+    ];
+  }
+  if (sectionKey === "recent_failures") {
+    return [
+      { label: "Data", format: (row) => escapeHtml(formatDate(row.created_at)) },
+      { label: "Tipo", format: (row) => escapeHtml(row.kind || "-") },
+      { label: "Curso", format: (row) => `${escapeHtml(row.course_name || "-")}<div class="subtle mono">${escapeHtml(String(row.course_ref || "-"))}</div>` },
+      { label: "Status", format: (row) => statusChip(row.status || "error") },
+      { label: "Erro", format: (row) => escapeHtml(row.error || "-") },
+    ];
+  }
+  return [
+    { label: "Chave", format: (_row) => "-" },
+  ];
+}
+
 function renderTable(columns, rows) {
   return `
     <div class="table-wrap">
@@ -1101,9 +1436,66 @@ function renderSettingsInfo(settings) {
   $("#settingsInfo").innerHTML = `
     <div class="dashboard-item"><strong>Base URL padrao</strong><div class="compact-meta mono">${escapeHtml(settings.default_base_url || "nao configurada")}</div></div>
     <div class="dashboard-item"><strong>Token no .env</strong><div class="compact-meta">${settings.env_token_available ? `Disponivel como ${escapeHtml(formatEnvTokenSource(settings.env_token_source))}.` : "Nao configurado."}</div></div>
+    <div class="dashboard-item"><strong>Banco de dados</strong><div class="compact-meta mono">${escapeHtml(settings.database_backend || "-")} | ${escapeHtml(settings.database_url_masked || "-")}</div></div>
     <div class="dashboard-item"><strong>Retry e timeout</strong><div class="compact-meta">${escapeHtml(String(settings.retry_max_attempts || 0))} tentativa(s) | atraso base ${escapeHtml(String(settings.retry_base_delay || 0))}s | timeout ${escapeHtml(String(settings.request_timeout || 0))}s</div></div>
     <div class="dashboard-item"><strong>Arquivo .env</strong><div class="compact-meta mono">${escapeHtml(settings.env_file_path || "-")}</div></div>
   `;
+}
+
+function renderEnvEditorState() {
+  $("#envPath").textContent = state.config?.env_file_path || "-";
+  const shell = $("#envEditorShell");
+  const editor = $("#envEditor");
+  const status = $("#envVisibilityStatus");
+  const saveButton = $("#saveEnvBtn");
+  if (!shell || !editor || !status || !saveButton) return;
+
+  shell.classList.toggle("is-masked", !state.envVisible);
+  editor.disabled = !state.envVisible;
+  saveButton.disabled = !state.envVisible;
+
+  if (state.envVisible) {
+    status.textContent = "Visivel por 10s";
+  } else {
+    status.textContent = "Oculto";
+    editor.value = "";
+    editor.placeholder = "Clique em revelar para visualizar por 10 segundos.";
+  }
+}
+
+function clearEnvRevealTimer() {
+  if (state.envRevealTimer) {
+    window.clearTimeout(state.envRevealTimer);
+    state.envRevealTimer = null;
+  }
+}
+
+function hideEnvFile() {
+  clearEnvRevealTimer();
+  state.envVisible = false;
+  state.envLoaded = false;
+  state.envContent = "";
+  renderEnvEditorState();
+}
+
+async function revealEnvFileTemporarily() {
+  const button = $("#revealEnvBtn");
+  setBusy(button, true, "Revelando...");
+  try {
+    await loadEnvFile(true);
+    state.envVisible = true;
+    $("#envEditor").value = state.envContent;
+    renderEnvEditorState();
+    clearEnvRevealTimer();
+    state.envRevealTimer = window.setTimeout(() => {
+      hideEnvFile();
+    }, 10000);
+    showNotice("Conteudo do .env revelado por 10 segundos.", "info");
+  } catch (error) {
+    showNotice(error.message, "error");
+  } finally {
+    setBusy(button, false);
+  }
 }
 
 async function loadEnvFile(force = false) {
@@ -1123,6 +1515,10 @@ async function saveEnvFile() {
   const button = $("#saveEnvBtn");
   setBusy(button, true, "Salvando...");
   try {
+    if (!state.envVisible) {
+      showNotice("Revele o .env antes de editar ou salvar.", "error");
+      return;
+    }
     const response = await apiFetch("/api/settings/env", { method: "PUT", body: { content: $("#envEditor").value } });
     state.envLoaded = true;
     state.envContent = response.content || "";
@@ -1130,6 +1526,65 @@ async function saveEnvFile() {
     await loadConfig();
     renderAll();
     showNotice("Arquivo .env salvo com sucesso.", "success");
+    hideEnvFile();
+  } catch (error) {
+    showNotice(error.message, "error");
+  } finally {
+    setBusy(button, false);
+  }
+}
+
+function renderWipeDatabaseResult(payload = null) {
+  const target = $("#wipeDatabaseResult");
+  if (!target) return;
+  if (!payload) {
+    target.textContent = "";
+    target.classList.add("hidden");
+    return;
+  }
+
+  const counts = payload.deleted_counts || {};
+  const fragments = Object.entries(counts)
+    .map(([key, value]) => `${toTitle(key)}: ${value}`)
+    .join(" | ");
+  target.textContent = `${payload.message || "Banco limpo com sucesso."}${fragments ? ` ${fragments}` : ""}`;
+  target.classList.remove("hidden");
+}
+
+async function wipeDatabase() {
+  const button = $("#wipeDatabaseBtn");
+  const confirmation = ($("#wipeDatabaseConfirm").value || "").trim().toUpperCase();
+  hideNotice();
+  renderWipeDatabaseResult(null);
+
+  if (confirmation !== "EXCLUIR") {
+    markInvalid("#wipeDatabaseConfirm");
+    focusField("#wipeDatabaseConfirm");
+    showNotice("Digite EXCLUIR para apagar todo o banco do painel.", "error");
+    return;
+  }
+
+  setBusy(button, true, "Apagando...");
+  try {
+    const response = await apiFetch("/api/settings/database/wipe", {
+      method: "POST",
+      body: { confirmation_text: confirmation },
+    });
+    stopPolling("announcement");
+    stopPolling("message");
+    state.connectionSnapshot = null;
+    state.selectedReportId = null;
+    state.history = [];
+    state.groups = [];
+    state.registeredCourses = [];
+    state.reportAnalytics = null;
+    $("#wipeDatabaseConfirm").value = "";
+    await loadConfig();
+    await loadHistory();
+    await loadAnalytics();
+    renderAll();
+    renderWipeDatabaseResult(response);
+    showNotice("Banco SQLite do painel apagado com sucesso.", "success");
   } catch (error) {
     showNotice(error.message, "error");
   } finally {

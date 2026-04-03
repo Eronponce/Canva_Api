@@ -1,20 +1,13 @@
 from __future__ import annotations
 
-from src.storage.group_store import GroupStore
-from src.storage.registered_course_store import RegisteredCourseStore
 from src.utils.parsing import parse_course_references
 
 
 class CourseService:
-    def __init__(
-        self,
-        connection_service,
-        group_store: GroupStore,
-        registered_course_store: RegisteredCourseStore,
-    ):
+    def __init__(self, connection_service, group_repository, course_repository):
         self.connection_service = connection_service
-        self.group_store = group_store
-        self.registered_course_store = registered_course_store
+        self.group_repository = group_repository
+        self.course_repository = course_repository
 
     def resolve_payload_course_refs(self, payload: dict) -> list[str]:
         direct_refs = payload.get("course_refs")
@@ -30,16 +23,17 @@ class CourseService:
         group_ids = payload.get("group_ids") or []
         select_all_groups = bool(payload.get("select_all_groups"))
 
-        selected_groups = []
         if select_all_groups:
-            selected_groups = self.group_store.list_groups()
+            selected_groups = self.group_repository.list_groups(active_only=True)
         elif isinstance(group_ids, list):
-            selected_ids = {str(item) for item in group_ids}
+            selected_ids = {str(item).strip() for item in group_ids if str(item).strip()}
             selected_groups = [
                 group
-                for group in self.group_store.list_groups()
+                for group in self.group_repository.list_groups(active_only=True)
                 if group.get("id") in selected_ids
             ]
+        else:
+            selected_groups = []
 
         refs: list[str] = []
         for group in selected_groups:
@@ -100,12 +94,17 @@ class CourseService:
         client = self.connection_service.build_client(payload)
         search_term = (payload.get("search_term") or "").strip().lower()
         courses = client.list_accessible_courses()
+        registered_refs = {
+            item["course_ref"]
+            for item in self.course_repository.list_courses(active_only=None)
+        }
 
         filtered = []
         for course in courses:
+            course_ref = str(course.get("id", "")).strip()
             haystack = " ".join(
                 [
-                    str(course.get("id", "")),
+                    course_ref,
                     course.get("name", "") or "",
                     course.get("course_code", "") or "",
                     ((course.get("term") or {}).get("name", "")),
@@ -116,21 +115,23 @@ class CourseService:
             filtered.append(
                 {
                     "id": course.get("id"),
+                    "course_ref": course_ref,
                     "name": course.get("name"),
                     "course_code": course.get("course_code"),
                     "term_name": (course.get("term") or {}).get("name"),
                     "workflow_state": course.get("workflow_state"),
+                    "already_registered": course_ref in registered_refs,
                 }
             )
 
         filtered.sort(key=lambda item: (item.get("name") or "").lower())
         return {
-            "items": filtered[:250],
+            "items": filtered,
             "total_found": len(filtered),
         }
 
-    def list_registered_courses(self) -> dict:
-        items = self.registered_course_store.list_courses()
+    def list_registered_courses(self, *, include_inactive: bool = False) -> dict:
+        items = self.course_repository.list_courses(active_only=None if include_inactive else True)
         return {"items": items}
 
     def add_registered_course(self, payload: dict) -> dict:
@@ -140,76 +141,107 @@ class CourseService:
             raise ValueError("Informe o numero do curso para cadastrar.")
 
         course = client.get_course(course_ref)
-        item = self.registered_course_store.add_course(
-            {
-                "course_ref": course_ref,
-                "canvas_course_id": course.get("id"),
-                "course_name": course.get("name"),
-                "course_code": course.get("course_code"),
-                "term_name": (course.get("term") or {}).get("name"),
-                "workflow_state": course.get("workflow_state"),
-            }
-        )
+        item = self.course_repository.upsert_course(self._course_payload(course_ref, course))
         return {"item": item}
 
+    def add_registered_courses(self, payload: dict) -> dict:
+        client = self.connection_service.build_client(payload)
+        course_refs = [
+            str(item).strip()
+            for item in (payload.get("course_refs") or [])
+            if str(item).strip()
+        ]
+        course_refs = list(dict.fromkeys(course_refs))
+        if not course_refs:
+            raise ValueError("Selecione pelo menos um curso para cadastrar.")
+
+        items = []
+        created_count = 0
+        updated_count = 0
+
+        for course_ref in course_refs:
+            existing = self.course_repository.get_course_by_ref(course_ref, active_only=None)
+            course = client.get_course(course_ref)
+            item = self.course_repository.upsert_course(self._course_payload(course_ref, course))
+            items.append(item)
+            if existing:
+                updated_count += 1
+            else:
+                created_count += 1
+
+        return {
+            "items": items,
+            "created_count": created_count,
+            "updated_count": updated_count,
+        }
+
     def delete_registered_course(self, course_ref: str) -> dict:
-        removed = self.registered_course_store.delete_course(course_ref)
+        removed = self.course_repository.delete_course(course_ref)
         if not removed:
             raise ValueError("Curso cadastrado nao encontrado.")
         return {"ok": True}
 
-    def list_groups(self) -> dict:
-        items = [self._attach_course_details(group) for group in self.group_store.list_groups()]
+    def reactivate_registered_course(self, course_ref: str) -> dict:
+        item = self.course_repository.reactivate_course(course_ref)
+        if not item:
+            raise ValueError("Curso cadastrado nao encontrado.")
+        return {"item": item}
+
+    def list_groups(self, *, include_inactive: bool = False) -> dict:
+        items = self.group_repository.list_groups(active_only=None if include_inactive else True)
         return {"items": items}
 
-    def get_group(self, group_id: str) -> dict:
-        group = self.group_store.get_group(group_id)
+    def get_group(self, group_id: str, *, include_inactive: bool = False) -> dict:
+        group = self.group_repository.get_group(group_id, active_only=None if include_inactive else True)
         if not group:
             raise ValueError("Grupo nao encontrado.")
-        return {"item": self._attach_course_details(group)}
+        return {"item": group}
 
     def create_group(self, payload: dict) -> dict:
         course_refs = self.resolve_payload_course_refs(payload)
-        saved = self.group_store.create_group(
+        saved = self.group_repository.create_group(
             payload.get("name", ""),
             course_refs,
             payload.get("description", ""),
+            payload.get("notes", ""),
         )
-        return {"item": self._attach_course_details(saved)}
+        return {"item": saved}
 
     def update_group(self, group_id: str, payload: dict) -> dict:
         course_refs = self.resolve_payload_course_refs(payload)
-        saved = self.group_store.update_group(
+        saved = self.group_repository.update_group(
             group_id,
             payload.get("name", ""),
             course_refs,
             payload.get("description", ""),
+            payload.get("notes", ""),
         )
-        return {"item": self._attach_course_details(saved)}
+        return {"item": saved}
 
     def delete_group(self, group_id: str) -> dict:
-        deleted = self.group_store.delete_group(group_id)
+        deleted = self.group_repository.delete_group(group_id)
         if not deleted:
             raise ValueError("Grupo nao encontrado.")
         return {"ok": True}
 
-    def _course_lookup(self) -> dict[str, dict]:
-        return {
-            str(item.get("course_ref")): item
-            for item in self.registered_course_store.list_courses()
-        }
+    def reactivate_group(self, group_id: str) -> dict:
+        item = self.group_repository.reactivate_group(group_id)
+        if not item:
+            raise ValueError("Grupo nao encontrado.")
+        return {"item": item}
 
-    def _attach_course_details(self, group: dict) -> dict:
-        lookup = self._course_lookup()
-        enriched = dict(group)
-        enriched["courses"] = [
-            {
-                "course_ref": course_ref,
-                "course_name": (lookup.get(str(course_ref)) or {}).get("course_name", ""),
-                "course_code": (lookup.get(str(course_ref)) or {}).get("course_code", ""),
-                "term_name": (lookup.get(str(course_ref)) or {}).get("term_name", ""),
-                "canvas_course_id": (lookup.get(str(course_ref)) or {}).get("canvas_course_id"),
-            }
-            for course_ref in group.get("course_refs", [])
-        ]
-        return enriched
+    @staticmethod
+    def _course_payload(course_ref: str, course: dict) -> dict:
+        return {
+            "course_ref": course_ref,
+            "canvas_course_id": course.get("id"),
+            "course_name": course.get("name"),
+            "course_code": course.get("course_code"),
+            "term_name": (course.get("term") or {}).get("name"),
+            "workflow_state": course.get("workflow_state"),
+            "source_type": "canvas_lookup",
+            "metadata_json": {
+                "enrollment_term_id": course.get("enrollment_term_id"),
+                "workflow_state": course.get("workflow_state"),
+            },
+        }

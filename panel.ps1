@@ -10,6 +10,7 @@ $LogsDir = Join-Path $ProjectRoot "logs"
 $StdoutLog = Join-Path $LogsDir "server.stdout.log"
 $StderrLog = Join-Path $LogsDir "server.stderr.log"
 $PidFile = Join-Path $LogsDir "server.pid"
+$EnvFile = Join-Path $ProjectRoot ".env"
 $Url = "http://127.0.0.1:5000"
 $CondaPython = Join-Path $env:USERPROFILE ".conda\envs\canvas-bulk-panel\python.exe"
 
@@ -89,6 +90,11 @@ function Start-App {
     }
 
     $pythonExe = Get-PythonPath
+    $env:CANVAS_PANEL_ENV_FILE = $EnvFile
+    Remove-Item Env:CANVAS_ACCESS_TOKEN -ErrorAction SilentlyContinue
+    Remove-Item Env:CANVAS_PERSONAL_ACCESS_TOKEN -ErrorAction SilentlyContinue
+    Remove-Item Env:CANVAS_API_TOKEN -ErrorAction SilentlyContinue
+
     $process = Start-Process `
         -FilePath $pythonExe `
         -ArgumentList "app.py" `

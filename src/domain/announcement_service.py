@@ -43,6 +43,19 @@ class AnnouncementService:
 
         client = self.connection_service.build_client(payload)
         user = client.get_current_user()
+        self.job_manager.update_metadata(
+            job_id,
+            base_url=payload.get("base_url") or "",
+            request_payload={
+                key: value
+                for key, value in payload.items()
+                if key not in {"access_token", "api_token"}
+            },
+            request_token_source="inline" if (payload.get("access_token") or payload.get("api_token")) else self.connection_service.app_config.default_token_source,
+            dry_run=dry_run,
+            canvas_user_id=user.get("id"),
+            canvas_user_name=user.get("name") or user.get("short_name") or "",
+        )
 
         self.job_manager.mark_running(
             job_id,
