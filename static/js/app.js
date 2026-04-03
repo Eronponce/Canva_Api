@@ -23,6 +23,10 @@ const state = {
     kind: null,
     data: null,
   },
+  recurrenceCancel: {
+    id: null,
+    item: null,
+  },
   selectedReportId: null,
   templateFocusFieldId: null,
   pickerSearch: {},
@@ -148,6 +152,14 @@ function bindEvents() {
       closeSendReviewModal();
     }
   });
+  $("#closeRecurrenceCancelModalBtn").addEventListener("click", closeRecurrenceCancelModal);
+  $("#cancelRecurrenceCancelBtn").addEventListener("click", closeRecurrenceCancelModal);
+  $("#confirmRecurrenceCancelBtn").addEventListener("click", confirmRecurrenceCancel);
+  $("#recurrenceCancelModal").addEventListener("click", (event) => {
+    if (event.target.dataset.action === "close-recurrence-cancel-modal") {
+      closeRecurrenceCancelModal();
+    }
+  });
 
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && !$("#groupModal").classList.contains("hidden")) {
@@ -155,6 +167,9 @@ function bindEvents() {
     }
     if (event.key === "Escape" && !$("#sendReviewModal").classList.contains("hidden")) {
       closeSendReviewModal();
+    }
+    if (event.key === "Escape" && !$("#recurrenceCancelModal").classList.contains("hidden")) {
+      closeRecurrenceCancelModal();
     }
   });
 
@@ -689,6 +704,16 @@ function showSendReviewNotice(message, type = "info") {
 
 function hideSendReviewNotice() {
   $("#sendReviewNotice").className = "notice hidden";
+}
+
+function showRecurrenceCancelNotice(message, type = "info") {
+  const notice = $("#recurrenceCancelNotice");
+  notice.textContent = message;
+  notice.className = `notice notice-${type}`;
+}
+
+function hideRecurrenceCancelNotice() {
+  $("#recurrenceCancelNotice").className = "notice hidden";
 }
 
 function setBusy(button, isBusy, busyText = "Processando...") {
@@ -1256,6 +1281,31 @@ function closeSendReviewModal() {
   $("#sendReviewMessage").innerHTML = "Nenhum conteudo carregado.";
 }
 
+function openRecurrenceCancelModal(item) {
+  state.recurrenceCancel = { id: item.id, item };
+  $("#recurrenceCancelReason").value = item.cancel_reason || "Mudanca de agenda";
+  $("#recurrenceCancelConfirm").value = "";
+  $("#recurrenceCancelSummary").innerHTML = [
+    metricCard("Recorrencia", item.name || item.title || "-"),
+    metricCard("Futuros", item.future_items || 0),
+    metricCard("Cancelados", item.canceled_items || 0),
+    metricCard("Proximo", formatDate(item.next_publish_at || "") || "-"),
+  ].join("");
+  hideRecurrenceCancelNotice();
+  $("#recurrenceCancelModal").classList.remove("hidden");
+  $("#recurrenceCancelModal").setAttribute("aria-hidden", "false");
+}
+
+function closeRecurrenceCancelModal() {
+  state.recurrenceCancel = { id: null, item: null };
+  hideRecurrenceCancelNotice();
+  $("#recurrenceCancelModal").classList.add("hidden");
+  $("#recurrenceCancelModal").setAttribute("aria-hidden", "true");
+  $("#recurrenceCancelSummary").innerHTML = "";
+  $("#recurrenceCancelReason").value = "";
+  $("#recurrenceCancelConfirm").value = "";
+}
+
 function reviewTitle(kind) {
   if (kind === "announcement") return "Revisar comunicado";
   if (kind === "message") return "Revisar caixa de entrada";
@@ -1526,24 +1576,40 @@ async function handleRecurrenceAction(action, recurrenceId) {
   if (action !== "cancel") {
     return;
   }
+  openRecurrenceCancelModal(recurrence);
+}
+
+async function confirmRecurrenceCancel() {
   if (!ensureConnectionConfigured()) return;
-  const button = document.querySelector(`[data-recurrence-action="cancel"][data-recurrence-id="${CSS.escape(recurrenceId)}"]`);
+  const recurrence = state.recurrenceCancel.item;
+  if (!recurrence) {
+    closeRecurrenceCancelModal();
+    return;
+  }
+  const confirmValue = $("#recurrenceCancelConfirm").value.trim().toUpperCase();
+  if (confirmValue !== "CANCELAR") {
+    showRecurrenceCancelNotice("Digite CANCELAR para confirmar a remocao dos avisos futuros.", "error");
+    $("#recurrenceCancelConfirm").focus();
+    return;
+  }
+  const button = $("#confirmRecurrenceCancelBtn");
   setBusy(button, true, "Cancelando...");
+  hideRecurrenceCancelNotice();
   hideNotice();
   try {
-    const cancelReason = window.prompt("Motivo do cancelamento dos avisos futuros:", recurrence.cancel_reason || "Mudanca de agenda") || "";
-    const response = await apiFetch(`/api/announcement-recurrences/${recurrenceId}/cancel`, {
+    const response = await apiFetch(`/api/announcement-recurrences/${recurrence.id}/cancel`, {
       method: "POST",
       body: {
         ...getConnectionPayload(),
-        cancel_reason: cancelReason.trim(),
+        cancel_reason: $("#recurrenceCancelReason").value.trim(),
       },
     });
     await loadConfig();
     renderAll();
+    closeRecurrenceCancelModal();
     showNotice(`Recorrencia cancelada. ${response.canceled_count || 0} aviso(s) futuro(s) removido(s) do Canvas.`, response.failure_count ? "info" : "success");
   } catch (error) {
-    showNotice(error.message, "error");
+    showRecurrenceCancelNotice(error.message, "error");
   } finally {
     setBusy(button, false);
   }

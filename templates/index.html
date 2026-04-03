@@ -909,5 +909,38 @@
       </div>
     </div>
   </div>
+
+  <div id="recurrenceCancelModal" class="modal hidden" aria-hidden="true">
+    <div class="modal-backdrop" data-action="close-recurrence-cancel-modal"></div>
+    <div class="modal-dialog">
+      <div class="card-header">
+        <div>
+          <h2>Cancelar avisos futuros</h2>
+          <p>Essa acao tenta remover do Canvas apenas os avisos futuros dessa recorrencia.</p>
+        </div>
+        <button id="closeRecurrenceCancelModalBtn" class="mini-btn ghost" type="button">Fechar</button>
+      </div>
+
+      <div id="recurrenceCancelNotice" class="notice hidden"></div>
+      <div id="recurrenceCancelSummary" class="summary-grid"></div>
+
+      <div class="stack-form spaced-top">
+        <label class="field">
+          <span>Motivo do cancelamento</span>
+          <textarea id="recurrenceCancelReason" rows="4" placeholder="Ex.: Mudanca de agenda"></textarea>
+        </label>
+
+        <label class="field">
+          <span>Digite CANCELAR para confirmar</span>
+          <input id="recurrenceCancelConfirm" type="text" placeholder="CANCELAR">
+        </label>
+      </div>
+
+      <div class="button-row">
+        <button id="confirmRecurrenceCancelBtn" class="btn btn-danger" type="button">Cancelar avisos futuros</button>
+        <button id="cancelRecurrenceCancelBtn" class="btn btn-secondary" type="button">Voltar</button>
+      </div>
+    </div>
+  </div>
 </body>
 </html>
