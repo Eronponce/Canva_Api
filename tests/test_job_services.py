@@ -35,6 +35,7 @@ class FakeCanvasClient:
         }
         self.announcements_created = []
         self.conversations_created = []
+        self.uploaded_attachments = []
 
     def get_current_user(self):
         return self.current_user
@@ -63,6 +64,10 @@ class FakeCanvasClient:
     def create_conversation(self, **kwargs):
         self.conversations_created.append(kwargs)
         return [{"id": 9000 + len(self.conversations_created)}]
+
+    def upload_conversation_attachment(self, **kwargs):
+        self.uploaded_attachments.append(kwargs)
+        return {"id": 3210, "display_name": kwargs["filename"]}
 
 
 def test_announcement_job_creates_report_and_history(app, monkeypatch):
@@ -124,6 +129,43 @@ def test_announcement_job_handles_course_failure(app, monkeypatch):
     assert finished["result"]["summary"]["failure_count"] == 1
     rows = finished["result"]["course_results"]
     assert any(row["status"] == "error" for row in rows)
+
+
+def test_announcement_job_sends_attachment_when_present(app, monkeypatch, tmp_path):
+    services = app.extensions["services"]
+    fake_client = FakeCanvasClient()
+    monkeypatch.setattr(services["connection_service"], "build_client", lambda payload: fake_client)
+
+    attachment_path = tmp_path / "recado.pdf"
+    attachment_path.write_bytes(b"pdf-test")
+
+    job_manager = services["job_manager"]
+    service = services["announcement_service"]
+    job = job_manager.create_job(kind="announcement", title="Aviso com anexo")
+
+    service.run_job(
+        job["id"],
+        {
+            "base_url": "https://canvas.example.com",
+            "access_token": "token",
+            "course_ids_text": "101",
+            "title": "Prova 1",
+            "message_html": "<p>Estudem</p>",
+            "publish_mode": "publish_now",
+            "lock_comment": True,
+            "dry_run": False,
+            "attachment_temp_path": str(attachment_path),
+            "attachment_name": "recado.pdf",
+            "attachment_content_type": "application/pdf",
+            "attachment_size": 8,
+        },
+    )
+
+    finished = job_manager.get_job(job["id"])
+    assert finished["status"] == "completed"
+    assert finished["result"]["summary"]["has_attachment"] is True
+    assert fake_client.announcements_created[0]["attachment"]["original_name"] == "recado.pdf"
+    assert attachment_path.exists() is False
 
 
 def test_message_job_deduplicates_students_in_dry_run(app, monkeypatch):
@@ -197,3 +239,41 @@ def test_message_job_filters_manual_recipients_and_falls_back_from_context(app, 
     assert rows[1]["manual_matches"] == 1
     assert rows[1]["recipients_targeted"] == 0
     assert rows[1]["status"] == "skipped"
+
+
+def test_message_job_uploads_attachment_once_and_reuses_ids(app, monkeypatch, tmp_path):
+    services = app.extensions["services"]
+    fake_client = FakeCanvasClient()
+    monkeypatch.setattr(services["connection_service"], "build_client", lambda payload: fake_client)
+
+    attachment_path = tmp_path / "guia.pdf"
+    attachment_path.write_bytes(b"guia")
+
+    job_manager = services["job_manager"]
+    service = services["message_service"]
+    job = job_manager.create_job(kind="message", title="Mensagem com anexo")
+
+    service.run_job(
+        job["id"],
+        {
+            "base_url": "https://canvas.example.com",
+            "access_token": "token",
+            "course_ids_text": "101",
+            "subject": "Lembrete",
+            "message": "Mensagem com anexo",
+            "strategy": "users",
+            "dedupe": True,
+            "dry_run": False,
+            "attachment_temp_path": str(attachment_path),
+            "attachment_name": "guia.pdf",
+            "attachment_content_type": "application/pdf",
+            "attachment_size": 4,
+        },
+    )
+
+    finished = job_manager.get_job(job["id"])
+    assert finished["status"] == "completed"
+    assert finished["result"]["summary"]["has_attachment"] is True
+    assert len(fake_client.uploaded_attachments) == 1
+    assert fake_client.conversations_created[0]["attachment_ids"] == [3210]
+    assert attachment_path.exists() is False

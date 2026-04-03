@@ -178,6 +178,7 @@ function bindEvents() {
   $("#announcementScheduleAt").addEventListener("input", persistUiState);
   $("#lockComment").addEventListener("change", persistUiState);
   $("#announcementDryRun").addEventListener("change", persistUiState);
+  $("#announcementAttachment").addEventListener("change", updateAttachmentMeta);
   $("#announcementForm").addEventListener("submit", submitAnnouncementJob);
 
   $("#messageSubject").addEventListener("input", persistUiState);
@@ -185,6 +186,7 @@ function bindEvents() {
   $("#messageStrategy").addEventListener("change", persistUiState);
   $("#messageDedupe").addEventListener("change", persistUiState);
   $("#messageDryRun").addEventListener("change", persistUiState);
+  $("#messageAttachment").addEventListener("change", updateAttachmentMeta);
   $("#messageForm").addEventListener("submit", submitMessageJob);
 
   $("#recurrenceName").addEventListener("input", persistUiState);
@@ -528,10 +530,15 @@ function getTargetPayload(kind) {
 async function apiFetch(url, options = {}) {
   const requestOptions = {
     method: options.method || "GET",
-    headers: { "Content-Type": "application/json", ...(options.headers || {}) },
+    headers: { ...(options.headers || {}) },
   };
   if (options.body !== undefined) {
-    requestOptions.body = JSON.stringify(options.body);
+    if (options.body instanceof FormData) {
+      requestOptions.body = options.body;
+    } else {
+      requestOptions.headers["Content-Type"] = "application/json";
+      requestOptions.body = JSON.stringify(options.body);
+    }
   }
   const response = await fetch(url, requestOptions);
   const data = await response.json().catch(() => ({}));
@@ -655,6 +662,9 @@ function renderAll() {
   renderEngagementPreview(state.engagement.preview);
   renderReports();
   renderSettingsInfo(state.config || {});
+  updateAnnouncementPreview();
+  updateAttachmentMeta({ target: $("#announcementAttachment") });
+  updateAttachmentMeta({ target: $("#messageAttachment") });
   renderEnvEditorState();
   renderConnectionResult(state.connectionSnapshot);
   persistUiState();
@@ -1752,6 +1762,40 @@ function updateAnnouncementPreview() {
   $("#announcementPreview").srcdoc = $("#announcementMessage").value.trim() || "<p></p>";
 }
 
+function updateAttachmentMeta(event) {
+  const input = event?.target;
+  if (!input) return;
+  const file = input.files?.[0] || null;
+  if (input.id === "announcementAttachment") {
+    $("#announcementAttachmentMeta").textContent = file
+      ? `${file.name} | ${formatFileSize(file.size)}`
+      : "O Canvas aceita o anexo direto na criacao do comunicado.";
+  }
+  if (input.id === "messageAttachment") {
+    $("#messageAttachmentMeta").textContent = file
+      ? `${file.name} | ${formatFileSize(file.size)}`
+      : "O arquivo sera enviado para o Canvas e reaproveitado no lote da caixa de entrada.";
+  }
+}
+
+function formatFileSize(bytes) {
+  const size = Number(bytes || 0);
+  if (!size) return "0 B";
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function buildMultipartPayload(payload, fileInputSelector) {
+  const formData = new FormData();
+  formData.append("payload_json", JSON.stringify(payload));
+  const file = $(fileInputSelector)?.files?.[0];
+  if (file) {
+    formData.append("attachment", file);
+  }
+  return formData;
+}
+
 async function submitAnnouncementJob(event) {
   event.preventDefault();
   const button = $("#announcementForm button[type='submit']");
@@ -1780,7 +1824,7 @@ async function submitAnnouncementJob(event) {
     }
     const response = await apiFetch("/api/announcements/jobs", {
       method: "POST",
-      body: {
+      body: buildMultipartPayload({
         ...getConnectionPayload(),
         ...getTargetPayload("announcement"),
         title: $("#announcementTitle").value.trim(),
@@ -1790,7 +1834,7 @@ async function submitAnnouncementJob(event) {
         client_timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
         lock_comment: $("#lockComment").checked,
         dry_run: $("#announcementDryRun").checked,
-      },
+      }, "#announcementAttachment"),
     });
     renderAnnouncementJob(response.job);
     startPolling(response.job.id, "announcement");
@@ -1812,7 +1856,7 @@ async function submitMessageJob(event) {
     if (!validateMessageForm()) return;
     const response = await apiFetch("/api/messages/jobs", {
       method: "POST",
-      body: buildMessageRequestBody(),
+      body: buildMultipartPayload(buildMessageRequestBody(), "#messageAttachment"),
     });
     renderMessageJob(response.job);
     startPolling(response.job.id, "message");
@@ -1908,6 +1952,7 @@ function renderAnnouncementJob(job) {
     { label: "Status", format: (row) => statusChip(row.status) },
     { label: "ID", format: (row) => escapeHtml(String(row.announcement_id || "-")) },
     { label: "Publicado", format: (row) => row.published ? "Sim" : "Nao" },
+    { label: "Anexo", format: (row) => escapeHtml(row.attachment_name || "-") },
     { label: "Erro", format: (row) => escapeHtml(row.error || "-") },
   ]);
 }
@@ -1919,6 +1964,7 @@ function renderMessageJob(job) {
     { label: "Alunos", format: (row) => escapeHtml(String(row.students_found || 0)) },
     { label: "Alvo", format: (row) => escapeHtml(String(row.recipients_targeted || 0)) },
     { label: "Enviados", format: (row) => escapeHtml(String(row.recipients_sent || 0)) },
+    { label: "Anexo", format: (row) => escapeHtml(row.attachment_name || "-") },
     { label: "Status", format: (row) => statusChip(row.status) },
     { label: "Erro", format: (row) => escapeHtml(row.error || "-") },
   ]);
@@ -2058,6 +2104,7 @@ function reportColumns(kind) {
       { label: "Alunos", format: (row) => escapeHtml(String(row.students_found || 0)) },
       { label: "Alvo", format: (row) => escapeHtml(String(row.recipients_targeted || 0)) },
       { label: "Enviados", format: (row) => escapeHtml(String(row.recipients_sent || 0)) },
+      { label: "Anexo", format: (row) => escapeHtml(row.attachment_name || "-") },
       { label: "Status", format: (row) => statusChip(row.status) },
       { label: "Erro", format: (row) => escapeHtml(row.error || "-") },
     ];
@@ -2066,6 +2113,7 @@ function reportColumns(kind) {
     { label: "Turma", format: (row) => `${escapeHtml(row.course_name || "-")}<div class="subtle mono">${escapeHtml(String(row.course_id || row.course_ref || "-"))}</div>` },
     { label: "ID", format: (row) => escapeHtml(String(row.announcement_id || "-")) },
     { label: "Publicado", format: (row) => row.published ? "Sim" : "Nao" },
+    { label: "Anexo", format: (row) => escapeHtml(row.attachment_name || "-") },
     { label: "Status", format: (row) => statusChip(row.status) },
     { label: "Erro", format: (row) => escapeHtml(row.error || "-") },
   ];

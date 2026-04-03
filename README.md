@@ -8,8 +8,9 @@ Painel web local para operar em lote no Canvas LMS usando apenas endpoints ofici
 - organiza cursos cadastrados e grupos de turmas
 - busca no Canvas os cursos acessiveis e permite cadastrar varios de uma vez
 - publica comunicados em lote
+- publica comunicados em lote com anexo opcional
 - cria recorrencias de avisos no proprio Canvas
-- envia mensagens pela caixa de entrada do Canvas em lote
+- envia mensagens pela caixa de entrada do Canvas em lote com anexo opcional
 - envia mensagens para alunos inativos com base em analytics e progresso de modulos
 - registra historico, resultados por turma e exportacao em CSV
 - permite limpar todo o banco local com confirmacao digitada
@@ -21,11 +22,11 @@ Painel web local para operar em lote no Canvas LMS usando apenas endpoints ofici
 2. `Organizacao`
    cursos cadastrados, catalogo do Canvas e grupos
 3. `Comunicados`
-   anuncios pontuais por grupos salvos ou cursos especificos
+   anuncios pontuais por grupos salvos ou cursos especificos, com anexo opcional
 4. `Recorrencia`
    cria varios avisos futuros no Canvas de uma vez
 5. `Caixa de entrada`
-   mensagens em lote por grupos salvos ou cursos especificos
+   mensagens em lote por grupos salvos ou cursos especificos, com anexo opcional
 6. `Inativos`
    mensagem para alunos sem acesso nenhum ou com recursos pendentes
 7. `Configuracoes`
@@ -96,6 +97,38 @@ O modulo `Inativos` foi feito para o fluxo:
 - o aluno pode receber notificacao por email se as preferencias dele no Canvas estiverem configuradas para isso
 - o criterio de `recursos pendentes` depende de requisitos de modulos configurados no curso
 
+## Anexos nativos no Canvas
+
+O painel agora suporta anexos nativos nos modulos:
+
+- `Comunicados`
+  o arquivo vai junto na criacao do `Discussion Topic`
+- `Caixa de entrada`
+  o arquivo e enviado uma vez para os arquivos do usuario no Canvas e depois reutilizado via `attachment_ids[]`
+
+### Como o fluxo funciona
+
+#### Comunicados
+
+1. o navegador envia o formulario e o arquivo para o painel
+2. o painel guarda um arquivo temporario local
+3. cada turma recebe o comunicado com o campo `attachment`
+4. o arquivo temporario e limpo ao final do job
+
+#### Caixa de entrada
+
+1. o navegador envia o formulario e o arquivo para o painel
+2. o painel guarda um arquivo temporario local
+3. o painel inicia o upload oficial em `users/self/files`
+4. o painel conclui o upload seguindo o fluxo oficial de `File Uploads`
+5. o `file_id` retornado entra em `attachment_ids[]` das `Conversations`
+6. o arquivo temporario e limpo antes do envio em lote
+
+### Limitacao atual
+
+- nesta rodada o painel aceita `1 arquivo por lote` em `Comunicados`
+- nesta rodada o painel aceita `1 arquivo por lote` em `Caixa de entrada`
+
 ## Stack
 
 - Backend: `Python + Flask`
@@ -140,6 +173,7 @@ O modulo `Inativos` foi feito para o fluxo:
 
 ### Caixa de entrada
 
+- `POST /api/v1/users/self/files`
 - `POST /api/v1/conversations`
 
 ### Inativos

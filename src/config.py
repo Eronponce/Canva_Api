@@ -57,14 +57,13 @@ class AppConfig:
     data_dir: Path
     reports_dir: Path
     logs_dir: Path
+    uploads_dir: Path
     database_file: Path
     history_file: Path
     groups_file: Path
     registered_courses_file: Path
     env_file: Path
     app_log_file: Path
-    scheduler_enabled: bool = True
-    scheduler_poll_seconds: int = 30
 
     @classmethod
     def from_env(cls) -> "AppConfig":
@@ -86,6 +85,7 @@ class AppConfig:
         data_dir = Path(os.getenv("CANVAS_PANEL_DATA_DIR", runtime_root / "data"))
         logs_dir = Path(os.getenv("CANVAS_PANEL_LOGS_DIR", runtime_root / "logs"))
         reports_dir = data_dir / "reports"
+        uploads_dir = data_dir / "uploads"
         database_file = data_dir / "canvas_bulk_panel.db"
         database_url = _first_non_empty(
             _resolve_env_value("DATABASE_URL", env_values),
@@ -117,8 +117,6 @@ class AppConfig:
             retry_max_attempts=int(_first_non_empty(_resolve_env_value("CANVAS_RETRY_MAX_ATTEMPTS", env_values), "4")),
             retry_base_delay=float(_first_non_empty(_resolve_env_value("CANVAS_RETRY_BASE_DELAY", env_values), "1.5")),
             history_limit=int(_first_non_empty(_resolve_env_value("HISTORY_LIMIT", env_values), "25")),
-            scheduler_enabled=_env_bool("SCHEDULER_ENABLED", True),
-            scheduler_poll_seconds=int(_first_non_empty(_resolve_env_value("SCHEDULER_POLL_SECONDS", env_values), "30")),
             legacy_json_import_enabled=_env_bool("ENABLE_LEGACY_JSON_IMPORT", False),
             default_base_url=_resolve_env_value("CANVAS_BASE_URL", env_values),
             default_access_token=default_access_token,
@@ -130,6 +128,7 @@ class AppConfig:
             data_dir=data_dir,
             reports_dir=reports_dir,
             logs_dir=logs_dir,
+            uploads_dir=uploads_dir,
             database_file=database_file,
             history_file=data_dir / "history.json",
             groups_file=data_dir / "course_groups.json",
@@ -142,6 +141,7 @@ class AppConfig:
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.reports_dir.mkdir(parents=True, exist_ok=True)
         self.logs_dir.mkdir(parents=True, exist_ok=True)
+        self.uploads_dir.mkdir(parents=True, exist_ok=True)
 
         if not self.history_file.exists():
             self.history_file.write_text("[]\n", encoding="utf-8")
@@ -185,8 +185,6 @@ class AppConfig:
         self.retry_max_attempts = int(_first_non_empty(_resolve_env_value("CANVAS_RETRY_MAX_ATTEMPTS", env_values), str(self.retry_max_attempts)))
         self.retry_base_delay = float(_first_non_empty(_resolve_env_value("CANVAS_RETRY_BASE_DELAY", env_values), str(self.retry_base_delay)))
         self.history_limit = int(_first_non_empty(_resolve_env_value("HISTORY_LIMIT", env_values), str(self.history_limit)))
-        self.scheduler_enabled = _env_bool("SCHEDULER_ENABLED", self.scheduler_enabled)
-        self.scheduler_poll_seconds = int(_first_non_empty(_resolve_env_value("SCHEDULER_POLL_SECONDS", env_values), str(self.scheduler_poll_seconds)))
         self.database_url = _first_non_empty(
             _resolve_env_value("DATABASE_URL", env_values),
             _resolve_env_value("MYSQL_URL", env_values),
@@ -206,8 +204,6 @@ class AppConfig:
             "retry_max_attempts": self.retry_max_attempts,
             "retry_base_delay": self.retry_base_delay,
             "history_limit": self.history_limit,
-            "scheduler_enabled": self.scheduler_enabled,
-            "scheduler_poll_seconds": self.scheduler_poll_seconds,
             "legacy_json_import_enabled": self.legacy_json_import_enabled,
             "env_file_path": str(self.env_file),
             "env_file_name": self.env_file.name,

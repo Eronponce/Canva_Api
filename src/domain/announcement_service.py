@@ -4,6 +4,7 @@ import csv
 from pathlib import Path
 
 from src.services.canvas_client import CanvasApiError
+from src.utils.attachment_utils import delete_temp_file
 from src.utils.parsing import parse_course_references
 from src.utils.time_utils import parse_schedule_datetime, utc_now_iso
 
@@ -22,11 +23,12 @@ class AnnouncementService:
         lock_comment = bool(payload.get("lock_comment"))
         dry_run = bool(payload.get("dry_run"))
         client_timezone = payload.get("client_timezone")
+        attachment = self._attachment_payload(payload)
 
         if not course_refs:
             raise ValueError("Informe pelo menos uma turma para publicar o comunicado.")
         if not title:
-            raise ValueError("Informe o título do comunicado.")
+            raise ValueError("Informe o titulo do comunicado.")
         if not message_html:
             raise ValueError("Informe a mensagem HTML do comunicado.")
 
@@ -41,167 +43,184 @@ class AnnouncementService:
                 raise ValueError("Informe a data e hora do agendamento.")
             published = True
 
-        client = self.connection_service.build_client(payload)
-        user = client.get_current_user()
-        self.job_manager.update_metadata(
-            job_id,
-            base_url=payload.get("base_url") or "",
-            request_payload={
-                key: value
-                for key, value in payload.items()
-                if key not in {"access_token", "api_token"}
-            },
-            request_token_source="inline" if (payload.get("access_token") or payload.get("api_token")) else self.connection_service.app_config.default_token_source,
-            dry_run=dry_run,
-            canvas_user_id=user.get("id"),
-            canvas_user_name=user.get("name") or user.get("short_name") or "",
-        )
-
-        self.job_manager.mark_running(
-            job_id,
-            total=len(course_refs),
-            step="Validando acesso ao Canvas",
-        )
-        self.job_manager.add_log(
-            job_id,
-            level="info",
-            message="Conexão validada com sucesso.",
-            data={"user_id": user.get("id"), "user_name": user.get("name")},
-        )
-
-        course_results = []
-        for index, course_ref in enumerate(course_refs, start=1):
-            self.job_manager.set_progress(
+        try:
+            client = self.connection_service.build_client(payload)
+            user = client.get_current_user()
+            self.job_manager.update_metadata(
                 job_id,
-                current=index - 1,
+                base_url=payload.get("base_url") or "",
+                request_payload=self._metadata_payload(payload, attachment),
+                request_token_source="inline" if (payload.get("access_token") or payload.get("api_token")) else self.connection_service.app_config.default_token_source,
+                dry_run=dry_run,
+                canvas_user_id=user.get("id"),
+                canvas_user_name=user.get("name") or user.get("short_name") or "",
+            )
+
+            self.job_manager.mark_running(
+                job_id,
                 total=len(course_refs),
-                step=f"Processando turma {course_ref}",
+                step="Validando acesso ao Canvas",
             )
             self.job_manager.add_log(
                 job_id,
                 level="info",
-                message="Iniciando processamento da turma.",
-                data={"course_ref": course_ref},
+                message="Conexao validada com sucesso.",
+                data={"user_id": user.get("id"), "user_name": user.get("name")},
             )
-
-            try:
-                course = client.get_course(course_ref)
-                result_row = {
-                    "course_ref": course_ref,
-                    "course_id": course.get("id"),
-                    "course_name": course.get("name"),
-                    "status": "success",
-                    "announcement_id": None,
-                    "announcement_url": None,
-                    "published": published,
-                    "delayed_post_at": delayed_post_at,
-                    "dry_run": dry_run,
-                    "error": None,
-                }
-
-                if dry_run:
-                    self.job_manager.add_log(
-                        job_id,
-                        level="info",
-                        message="Dry run do comunicado concluído para a turma.",
-                        data={"course_id": course.get("id"), "course_name": course.get("name")},
-                    )
-                else:
-                    response = client.create_announcement(
-                        course_ref=str(course.get("id")),
-                        title=title,
-                        message_html=message_html,
-                        published=published,
-                        delayed_post_at=delayed_post_at,
-                        lock_comment=lock_comment,
-                    )
-                    result_row["announcement_id"] = response.get("id")
-                    result_row["announcement_url"] = response.get("html_url")
-                    result_row["published"] = response.get("published", published)
-                    self.job_manager.add_log(
-                        job_id,
-                        level="info",
-                        message="Comunicado criado com sucesso.",
-                        data={
-                            "course_id": course.get("id"),
-                            "announcement_id": response.get("id"),
-                        },
-                    )
-
-                course_results.append(result_row)
-            except CanvasApiError as exc:
+            if attachment:
                 self.job_manager.add_log(
                     job_id,
-                    level="error",
-                    message="Falha ao publicar comunicado na turma.",
-                    data={"course_ref": course_ref, "error": exc.to_dict()},
+                    level="info",
+                    message="Anexo preparado para o lote de comunicados.",
+                    data={
+                        "attachment_name": attachment["original_name"],
+                        "attachment_size": attachment["size"],
+                        "attachment_content_type": attachment["content_type"],
+                    },
                 )
-                course_results.append(
-                    {
-                        "course_ref": course_ref,
-                        "course_id": None,
-                        "course_name": None,
-                        "status": "error",
-                        "announcement_id": None,
-                        "announcement_url": None,
-                        "published": published,
-                        "delayed_post_at": delayed_post_at,
-                        "dry_run": dry_run,
-                        "error": exc.message,
-                    }
-                )
-            except Exception as exc:  # noqa: BLE001
-                self.job_manager.add_log(
-                    job_id,
-                    level="error",
-                    message="Erro inesperado ao processar a turma.",
-                    data={"course_ref": course_ref, "error": str(exc)},
-                )
-                course_results.append(
-                    {
-                        "course_ref": course_ref,
-                        "course_id": None,
-                        "course_name": None,
-                        "status": "error",
-                        "announcement_id": None,
-                        "announcement_url": None,
-                        "published": published,
-                        "delayed_post_at": delayed_post_at,
-                        "dry_run": dry_run,
-                        "error": str(exc),
-                    }
-                )
-            finally:
+
+            course_results = []
+            for index, course_ref in enumerate(course_refs, start=1):
                 self.job_manager.set_progress(
                     job_id,
-                    current=index,
+                    current=index - 1,
                     total=len(course_refs),
-                    step=f"Turma {course_ref} concluída",
+                    step=f"Processando turma {course_ref}",
+                )
+                self.job_manager.add_log(
+                    job_id,
+                    level="info",
+                    message="Iniciando processamento da turma.",
+                    data={"course_ref": course_ref},
                 )
 
-        summary = {
-            "requested_at": utc_now_iso(),
-            "requested_by": {
-                "id": user.get("id"),
-                "name": user.get("name"),
-            },
-            "courses_processed": len(course_results),
-            "success_count": len([row for row in course_results if row["status"] == "success"]),
-            "failure_count": len([row for row in course_results if row["status"] == "error"]),
-            "dry_run": dry_run,
-            "publish_mode": publish_mode,
-            "lock_comment": lock_comment,
-        }
+                try:
+                    course = client.get_course(course_ref)
+                    result_row = {
+                        "course_ref": course_ref,
+                        "course_id": course.get("id"),
+                        "course_name": course.get("name"),
+                        "status": "success",
+                        "announcement_id": None,
+                        "announcement_url": None,
+                        "published": published,
+                        "delayed_post_at": delayed_post_at,
+                        "dry_run": dry_run,
+                        "attachment_name": attachment["original_name"] if attachment else "",
+                        "error": None,
+                    }
 
-        report_filename = self._write_report(job_id, course_results)
-        self.job_manager.complete(
-            job_id,
-            result={
-                "summary": summary,
-                "course_results": course_results,
-            },
-            report_filename=report_filename,
-        )
+                    if dry_run:
+                        self.job_manager.add_log(
+                            job_id,
+                            level="info",
+                            message="Dry run do comunicado concluido para a turma.",
+                            data={"course_id": course.get("id"), "course_name": course.get("name")},
+                        )
+                    else:
+                        response = client.create_announcement(
+                            course_ref=str(course.get("id")),
+                            title=title,
+                            message_html=message_html,
+                            published=published,
+                            delayed_post_at=delayed_post_at,
+                            lock_comment=lock_comment,
+                            attachment=attachment,
+                        )
+                        result_row["announcement_id"] = response.get("id")
+                        result_row["announcement_url"] = response.get("html_url")
+                        result_row["published"] = response.get("published", published)
+                        self.job_manager.add_log(
+                            job_id,
+                            level="info",
+                            message="Comunicado criado com sucesso.",
+                            data={
+                                "course_id": course.get("id"),
+                                "announcement_id": response.get("id"),
+                                "attachment_name": attachment["original_name"] if attachment else None,
+                            },
+                        )
+
+                    course_results.append(result_row)
+                except CanvasApiError as exc:
+                    self.job_manager.add_log(
+                        job_id,
+                        level="error",
+                        message="Falha ao publicar comunicado na turma.",
+                        data={"course_ref": course_ref, "error": exc.to_dict()},
+                    )
+                    course_results.append(
+                        {
+                            "course_ref": course_ref,
+                            "course_id": None,
+                            "course_name": None,
+                            "status": "error",
+                            "announcement_id": None,
+                            "announcement_url": None,
+                            "published": published,
+                            "delayed_post_at": delayed_post_at,
+                            "dry_run": dry_run,
+                            "attachment_name": attachment["original_name"] if attachment else "",
+                            "error": exc.message,
+                        }
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    self.job_manager.add_log(
+                        job_id,
+                        level="error",
+                        message="Erro inesperado ao processar a turma.",
+                        data={"course_ref": course_ref, "error": str(exc)},
+                    )
+                    course_results.append(
+                        {
+                            "course_ref": course_ref,
+                            "course_id": None,
+                            "course_name": None,
+                            "status": "error",
+                            "announcement_id": None,
+                            "announcement_url": None,
+                            "published": published,
+                            "delayed_post_at": delayed_post_at,
+                            "dry_run": dry_run,
+                            "attachment_name": attachment["original_name"] if attachment else "",
+                            "error": str(exc),
+                        }
+                    )
+                finally:
+                    self.job_manager.set_progress(
+                        job_id,
+                        current=index,
+                        total=len(course_refs),
+                        step=f"Turma {course_ref} concluida",
+                    )
+
+            summary = {
+                "requested_at": utc_now_iso(),
+                "requested_by": {
+                    "id": user.get("id"),
+                    "name": user.get("name"),
+                },
+                "courses_processed": len(course_results),
+                "success_count": len([row for row in course_results if row["status"] == "success"]),
+                "failure_count": len([row for row in course_results if row["status"] == "error"]),
+                "dry_run": dry_run,
+                "publish_mode": publish_mode,
+                "lock_comment": lock_comment,
+                "has_attachment": bool(attachment),
+                "attachment_name": attachment["original_name"] if attachment else "",
+            }
+
+            report_filename = self._write_report(job_id, course_results)
+            self.job_manager.complete(
+                job_id,
+                result={
+                    "summary": summary,
+                    "course_results": course_results,
+                },
+                report_filename=report_filename,
+            )
+        finally:
+            delete_temp_file((attachment or {}).get("temp_path"))
 
     def _write_report(self, job_id: str, rows: list[dict]) -> str:
         report_filename = f"announcement-report-{job_id}.csv"
@@ -216,6 +235,7 @@ class AnnouncementService:
             "published",
             "delayed_post_at",
             "dry_run",
+            "attachment_name",
             "error",
         ]
 
@@ -225,3 +245,39 @@ class AnnouncementService:
             writer.writerows(rows)
 
         return report_filename
+
+    @staticmethod
+    def _attachment_payload(payload: dict) -> dict | None:
+        temp_path = str(payload.get("attachment_temp_path") or "").strip()
+        original_name = str(payload.get("attachment_name") or "").strip()
+        if not temp_path or not original_name:
+            return None
+        return {
+            "temp_path": temp_path,
+            "original_name": original_name,
+            "content_type": str(payload.get("attachment_content_type") or "application/octet-stream").strip() or "application/octet-stream",
+            "size": int(payload.get("attachment_size") or 0),
+        }
+
+    @staticmethod
+    def _metadata_payload(payload: dict, attachment: dict | None) -> dict:
+        data = {
+            key: value
+            for key, value in payload.items()
+            if key
+            not in {
+                "access_token",
+                "api_token",
+                "attachment_temp_path",
+                "attachment_name",
+                "attachment_content_type",
+                "attachment_size",
+            }
+        }
+        if attachment:
+            data["attachment"] = {
+                "name": attachment["original_name"],
+                "content_type": attachment["content_type"],
+                "size": attachment["size"],
+            }
+        return data

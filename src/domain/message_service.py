@@ -4,6 +4,7 @@ import csv
 from pathlib import Path
 
 from src.services.canvas_client import CanvasApiError
+from src.utils.attachment_utils import delete_temp_file
 from src.utils.parsing import chunked, parse_course_references
 from src.utils.time_utils import utc_now_iso
 
@@ -83,6 +84,7 @@ class MessageService:
         dry_run = bool(payload.get("dry_run"))
         manual_recipients = bool(payload.get("manual_recipients"))
         selected_user_ids = self._selected_user_ids(payload)
+        attachment = self._attachment_payload(payload)
 
         if not course_refs:
             raise ValueError("Informe pelo menos uma turma para enviar as mensagens.")
@@ -99,11 +101,7 @@ class MessageService:
         self.job_manager.update_metadata(
             job_id,
             base_url=payload.get("base_url") or "",
-            request_payload={
-                key: value
-                for key, value in payload.items()
-                if key not in {"access_token", "api_token"}
-            },
+            request_payload=self._metadata_payload(payload, attachment),
             request_token_source="inline" if (payload.get("access_token") or payload.get("api_token")) else self.connection_service.app_config.default_token_source,
             requested_strategy=requested_strategy,
             effective_strategy=effective_strategy,
@@ -126,6 +124,39 @@ class MessageService:
             )
             self.job_manager.update_metadata(job_id, effective_strategy=effective_strategy)
 
+        uploaded_attachment = None
+        if attachment:
+            try:
+                if not dry_run:
+                    uploaded_attachment = client.upload_conversation_attachment(
+                        file_path=attachment["temp_path"],
+                        filename=attachment["original_name"],
+                        content_type=attachment["content_type"],
+                        size=attachment["size"],
+                    )
+                    self.job_manager.add_log(
+                        job_id,
+                        level="info",
+                        message="Anexo enviado para o Canvas e pronto para reutilizacao no lote.",
+                        data={
+                            "attachment_name": attachment["original_name"],
+                            "canvas_file_id": uploaded_attachment.get("id"),
+                        },
+                    )
+            except CanvasApiError as exc:
+                self.job_manager.add_log(
+                    job_id,
+                    level="error",
+                    message="Falha ao preparar o anexo da caixa de entrada.",
+                    data={"error": exc.to_dict()},
+                )
+                raise ValueError("Nao foi possivel preparar o anexo para a caixa de entrada.") from exc
+            finally:
+                delete_temp_file(attachment.get("temp_path"))
+                attachment["temp_path"] = ""
+
+        attachment_ids = [int(uploaded_attachment["id"])] if uploaded_attachment and uploaded_attachment.get("id") is not None else []
+
         total_steps = max(len(course_refs) * 2, 1)
         self.job_manager.mark_running(
             job_id,
@@ -138,6 +169,17 @@ class MessageService:
             message="Conexao validada para o envio de mensagens.",
             data={"user_id": user.get("id"), "user_name": user.get("name")},
         )
+        if attachment:
+            self.job_manager.add_log(
+                job_id,
+                level="info",
+                message="Lote da caixa de entrada contem anexo.",
+                data={
+                    "attachment_name": attachment["original_name"],
+                    "attachment_size": attachment["size"],
+                    "dry_run": dry_run,
+                },
+            )
 
         prepared_courses = []
         step_index = 0
@@ -237,6 +279,8 @@ class MessageService:
                 "batch_count": 0,
                 "status": "success",
                 "conversation_ids": [],
+                "attachment_name": attachment["original_name"] if attachment else "",
+                "attachment_file_id": attachment_ids[0] if attachment_ids else None,
                 "error": None,
                 "dry_run": dry_run,
                 "messageable_context": bool(prepared_course["context_match"]),
@@ -310,6 +354,7 @@ class MessageService:
                         context_code=prepared_course["context_code"],
                         force_new=True,
                         group_conversation=False,
+                        attachment_ids=attachment_ids,
                     )
                     result_row["conversation_ids"] = self._extract_conversation_ids(response)
                     result_row["recipients_sent"] = len(target_ids)
@@ -344,6 +389,7 @@ class MessageService:
                             context_code=prepared_course["context_code"],
                             force_new=True,
                             group_conversation=False,
+                            attachment_ids=attachment_ids,
                         )
                         result_row["conversation_ids"].extend(self._extract_conversation_ids(response))
                         result_row["recipients_sent"] += len(recipient_chunk)
@@ -413,6 +459,9 @@ class MessageService:
             "dedupe": dedupe,
             "manual_recipients": manual_recipients,
             "selected_user_count": len(selected_user_ids),
+            "has_attachment": bool(attachment),
+            "attachment_name": attachment["original_name"] if attachment else "",
+            "attachment_file_id": attachment_ids[0] if attachment_ids else None,
             "total_courses": len(course_results),
             "total_students_found": total_students_found,
             "total_recipients_targeted": total_recipients_targeted,
@@ -459,6 +508,8 @@ class MessageService:
             "batch_count",
             "status",
             "conversation_ids",
+            "attachment_name",
+            "attachment_file_id",
             "dry_run",
             "messageable_context",
             "manual_recipients",
@@ -490,6 +541,42 @@ class MessageService:
             except (TypeError, ValueError):
                 continue
         return selected
+
+    @staticmethod
+    def _attachment_payload(payload: dict) -> dict | None:
+        temp_path = str(payload.get("attachment_temp_path") or "").strip()
+        original_name = str(payload.get("attachment_name") or "").strip()
+        if not temp_path or not original_name:
+            return None
+        return {
+            "temp_path": temp_path,
+            "original_name": original_name,
+            "content_type": str(payload.get("attachment_content_type") or "application/octet-stream").strip() or "application/octet-stream",
+            "size": int(payload.get("attachment_size") or 0),
+        }
+
+    @staticmethod
+    def _metadata_payload(payload: dict, attachment: dict | None) -> dict:
+        data = {
+            key: value
+            for key, value in payload.items()
+            if key
+            not in {
+                "access_token",
+                "api_token",
+                "attachment_temp_path",
+                "attachment_name",
+                "attachment_content_type",
+                "attachment_size",
+            }
+        }
+        if attachment:
+            data["attachment"] = {
+                "name": attachment["original_name"],
+                "content_type": attachment["content_type"],
+                "size": attachment["size"],
+            }
+        return data
 
     @staticmethod
     def _student_name(student: dict) -> str:

@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import json
+
 from flask import Blueprint, current_app, jsonify, render_template, request, send_from_directory
 
 from src.services.canvas_client import CanvasApiError
+from src.utils.attachment_utils import save_uploaded_file
 
 
 web = Blueprint("web", __name__)
@@ -10,6 +13,27 @@ web = Blueprint("web", __name__)
 
 def services():
     return current_app.extensions["services"]
+
+
+def _request_payload() -> dict:
+    if request.is_json:
+        return request.get_json(silent=True) or {}
+
+    raw_payload = request.form.get("payload_json", "")
+    if raw_payload:
+        try:
+            return json.loads(raw_payload)
+        except json.JSONDecodeError as exc:
+            raise ValueError("Nao foi possivel interpretar os dados enviados pelo formulario.") from exc
+    return {}
+
+
+def _request_attachment() -> dict | None:
+    uploaded_file = request.files.get("attachment")
+    if not uploaded_file or not uploaded_file.filename:
+        return None
+    app_config = current_app.config["APP_CONFIG"]
+    return save_uploaded_file(uploaded_file, app_config.uploads_dir)
 
 
 def _with_resolved_courses(payload: dict, empty_message: str) -> tuple[dict, list[str]]:
@@ -180,7 +204,16 @@ def wipe_database():
 
 @web.post("/api/announcements/jobs")
 def create_announcement_job():
-    raw_payload = request.get_json(silent=True) or {}
+    raw_payload = _request_payload()
+    attachment = _request_attachment()
+    if attachment:
+        raw_payload = {
+            **raw_payload,
+            "attachment_temp_path": attachment["temp_path"],
+            "attachment_name": attachment["original_name"],
+            "attachment_content_type": attachment["content_type"],
+            "attachment_size": attachment["size"],
+        }
     payload, course_refs = _with_resolved_courses(
         raw_payload,
         "Selecione ao menos um grupo ou curso para publicar o comunicado.",
@@ -211,7 +244,16 @@ def create_announcement_job():
 
 @web.post("/api/messages/jobs")
 def create_message_job():
-    raw_payload = request.get_json(silent=True) or {}
+    raw_payload = _request_payload()
+    attachment = _request_attachment()
+    if attachment:
+        raw_payload = {
+            **raw_payload,
+            "attachment_temp_path": attachment["temp_path"],
+            "attachment_name": attachment["original_name"],
+            "attachment_content_type": attachment["content_type"],
+            "attachment_size": attachment["size"],
+        }
     payload, course_refs = _with_resolved_courses(
         raw_payload,
         "Selecione ao menos um grupo ou curso para enviar as mensagens.",

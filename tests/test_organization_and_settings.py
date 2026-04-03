@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import io
+import json
+
 
 class FakeCourseLookupClient:
     def __init__(self):
@@ -198,6 +201,7 @@ def test_app_boot_does_not_create_env_file_when_missing(isolated_env):
         data_dir=tmp_root / "data",
         reports_dir=(tmp_root / "data" / "reports"),
         logs_dir=tmp_root / "logs",
+        uploads_dir=(tmp_root / "data" / "uploads"),
         database_file=(tmp_root / "data" / "test.db"),
         history_file=(tmp_root / "data" / "history.json"),
         groups_file=(tmp_root / "data" / "course_groups.json"),
@@ -253,6 +257,48 @@ def test_announcement_job_route_resolves_group_ids_into_courses(app, monkeypatch
     assert response.status_code == 202
     assert captured["payload"]["course_ids_text"] == "101\n202"
     assert captured["payload"]["course_refs"] == ["101", "202"]
+
+
+def test_announcement_job_route_accepts_multipart_attachment(app, monkeypatch):
+    client = app.test_client()
+    services = app.extensions["services"]
+
+    monkeypatch.setattr(services["connection_service"], "build_client", lambda payload: FakeCourseLookupClient())
+    services["course_service"].add_registered_course(
+        {"course_ref": "101", "base_url": "https://canvas.example.com", "access_token": "token"}
+    )
+
+    captured = {}
+
+    def fake_start_background(job_id, fn, payload):
+        captured["payload"] = payload
+
+    services["job_manager"].start_background = fake_start_background
+
+    response = client.post(
+        "/api/announcements/jobs",
+        data={
+            "payload_json": json.dumps(
+                {
+                    "base_url": "https://canvas.example.com",
+                    "access_token": "token",
+                    "target_mode": "courses",
+                    "course_refs": ["101"],
+                    "title": "Aviso",
+                    "message_html": "<p>Teste</p>",
+                    "publish_mode": "publish_now",
+                }
+            ),
+            "attachment": (io.BytesIO(b"pdf"), "aviso.pdf"),
+        },
+        content_type="multipart/form-data",
+    )
+
+    assert response.status_code == 202
+    assert captured["payload"]["course_ids_text"] == "101"
+    assert captured["payload"]["attachment_name"] == "aviso.pdf"
+    assert captured["payload"]["attachment_size"] == 3
+    assert captured["payload"]["attachment_temp_path"]
 
 
 def test_message_job_route_resolves_all_groups_without_duplicates(app, monkeypatch):

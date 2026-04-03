@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Iterable
 from urllib.parse import quote
 
@@ -73,18 +74,26 @@ class CanvasClient:
         *,
         params=None,
         data=None,
+        files=None,
+        headers=None,
+        use_auth: bool = True,
+        allow_redirects: bool = True,
         expected_status: Iterable[int] = (200,),
     ) -> tuple[object, requests.Response]:
         url = self._build_url(path)
         expected_status = set(expected_status)
+        request_callable = self.session.request if use_auth else requests.request
 
         for attempt in range(1, self.retry_max_attempts + 1):
-            response = self.session.request(
+            response = request_callable(
                 method=method,
                 url=url,
                 params=params,
                 data=data,
+                files=files,
+                headers=headers,
                 timeout=self.timeout,
+                allow_redirects=allow_redirects,
             )
 
             if response.status_code in expected_status:
@@ -211,6 +220,7 @@ class CanvasClient:
         published: bool,
         delayed_post_at: str | None,
         lock_comment: bool,
+        attachment: dict | None = None,
     ) -> dict:
         safe_ref = quote(str(course_ref), safe=":")
         form_data = [
@@ -224,12 +234,28 @@ class CanvasClient:
         if delayed_post_at:
             form_data.append(("delayed_post_at", delayed_post_at))
 
-        payload, _ = self._request(
-            "POST",
-            f"/api/v1/courses/{safe_ref}/discussion_topics",
-            data=form_data,
-            expected_status=(200, 201),
-        )
+        if attachment:
+            with Path(str(attachment["temp_path"])).open("rb") as file_handle:
+                payload, _ = self._request(
+                    "POST",
+                    f"/api/v1/courses/{safe_ref}/discussion_topics",
+                    data=form_data,
+                    files={
+                        "attachment": (
+                            attachment["original_name"],
+                            file_handle,
+                            attachment.get("content_type") or "application/octet-stream",
+                        )
+                    },
+                    expected_status=(200, 201),
+                )
+        else:
+            payload, _ = self._request(
+                "POST",
+                f"/api/v1/courses/{safe_ref}/discussion_topics",
+                data=form_data,
+                expected_status=(200, 201),
+            )
         return payload
 
     def delete_discussion_topic(self, *, course_ref: str, topic_id: int | str) -> dict | str:
@@ -287,6 +313,7 @@ class CanvasClient:
         force_new: bool = True,
         group_conversation: bool = False,
         mode: str | None = None,
+        attachment_ids: list[int] | None = None,
         extra_params: dict[str, str | bool | int] | None = None,
     ):
         form_data: list[tuple[str, str]] = []
@@ -306,6 +333,8 @@ class CanvasClient:
             form_data.append(("context_code", context_code))
         if mode:
             form_data.append(("mode", mode))
+        for attachment_id in attachment_ids or []:
+            form_data.append(("attachment_ids[]", str(attachment_id)))
         for key, value in (extra_params or {}).items():
             if isinstance(value, bool):
                 form_data.append((key, bool_to_canvas(value)))
@@ -319,3 +348,105 @@ class CanvasClient:
             expected_status=(200, 201),
         )
         return payload
+
+    def initiate_user_file_upload(
+        self,
+        *,
+        filename: str,
+        size: int,
+        content_type: str,
+        parent_folder_path: str = "conversation attachments",
+        on_duplicate: str = "rename",
+    ) -> dict:
+        payload, _ = self._request(
+            "POST",
+            "/api/v1/users/self/files",
+            data=[
+                ("name", filename),
+                ("size", str(size)),
+                ("content_type", content_type),
+                ("parent_folder_path", parent_folder_path),
+                ("on_duplicate", on_duplicate),
+            ],
+            expected_status=(200, 201),
+        )
+        if not isinstance(payload, dict) or not payload.get("upload_url") or not payload.get("upload_params"):
+            raise CanvasApiError(
+                message="Canvas nao retornou o fluxo de upload esperado para o anexo.",
+                details=payload,
+            )
+        return payload
+
+    def upload_file_to_canvas(
+        self,
+        *,
+        upload_url: str,
+        upload_params: dict,
+        file_path: str,
+        filename: str,
+        content_type: str,
+    ) -> dict:
+        multipart_data = [(str(key), str(value)) for key, value in (upload_params or {}).items()]
+        with Path(file_path).open("rb") as file_handle:
+            _payload, response = self._request(
+                "POST",
+                upload_url,
+                data=multipart_data,
+                files={
+                    "file": (
+                        filename,
+                        file_handle,
+                        content_type or "application/octet-stream",
+                    )
+                },
+                headers={"Accept": "application/json"},
+                use_auth=False,
+                allow_redirects=False,
+                expected_status=(200, 201, 301, 302, 303),
+            )
+
+        location = response.headers.get("Location")
+        if response.status_code in {301, 302, 303}:
+            if not location:
+                raise CanvasApiError(
+                    message="Canvas nao retornou a URL final do upload do anexo.",
+                    status_code=response.status_code,
+                )
+            payload, _ = self._request("GET", location, expected_status=(200, 201))
+            if not isinstance(payload, dict):
+                raise CanvasApiError(message="Canvas nao retornou o arquivo anexado em JSON.", details=payload)
+            return payload
+
+        if response.status_code == 201 and location:
+            payload, _ = self._request("GET", location, expected_status=(200, 201))
+            if not isinstance(payload, dict):
+                raise CanvasApiError(message="Canvas nao retornou o arquivo anexado em JSON.", details=payload)
+            return payload
+
+        payload = self._extract_json_or_text(response)
+        if not isinstance(payload, dict):
+            raise CanvasApiError(message="Upload do anexo concluiu sem retornar JSON de arquivo.", details=payload)
+        return payload
+
+    def upload_conversation_attachment(
+        self,
+        *,
+        file_path: str,
+        filename: str,
+        content_type: str,
+        size: int,
+    ) -> dict:
+        upload_start = self.initiate_user_file_upload(
+            filename=filename,
+            size=size,
+            content_type=content_type,
+            parent_folder_path="conversation attachments",
+            on_duplicate="rename",
+        )
+        return self.upload_file_to_canvas(
+            upload_url=upload_start["upload_url"],
+            upload_params=upload_start["upload_params"],
+            file_path=file_path,
+            filename=filename,
+            content_type=content_type,
+        )
