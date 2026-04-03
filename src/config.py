@@ -57,6 +57,7 @@ class AppConfig:
     data_dir: Path
     reports_dir: Path
     logs_dir: Path
+    uploads_dir: Path
     database_file: Path
     history_file: Path
     groups_file: Path
@@ -84,6 +85,7 @@ class AppConfig:
         data_dir = Path(os.getenv("CANVAS_PANEL_DATA_DIR", runtime_root / "data"))
         logs_dir = Path(os.getenv("CANVAS_PANEL_LOGS_DIR", runtime_root / "logs"))
         reports_dir = data_dir / "reports"
+        uploads_dir = data_dir / "uploads"
         database_file = data_dir / "canvas_bulk_panel.db"
         database_url = _first_non_empty(
             _resolve_env_value("DATABASE_URL", env_values),
@@ -126,6 +128,7 @@ class AppConfig:
             data_dir=data_dir,
             reports_dir=reports_dir,
             logs_dir=logs_dir,
+            uploads_dir=uploads_dir,
             database_file=database_file,
             history_file=data_dir / "history.json",
             groups_file=data_dir / "course_groups.json",
@@ -138,6 +141,7 @@ class AppConfig:
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.reports_dir.mkdir(parents=True, exist_ok=True)
         self.logs_dir.mkdir(parents=True, exist_ok=True)
+        self.uploads_dir.mkdir(parents=True, exist_ok=True)
 
         if not self.history_file.exists():
             self.history_file.write_text("[]\n", encoding="utf-8")

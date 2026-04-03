@@ -1,5 +1,13 @@
 from __future__ import annotations
 
+import io
+import json
+from datetime import UTC, datetime, timedelta
+
+from sqlalchemy import select
+
+from src.database.models import JobRun
+
 
 class FakeCourseLookupClient:
     def __init__(self):
@@ -198,6 +206,7 @@ def test_app_boot_does_not_create_env_file_when_missing(isolated_env):
         data_dir=tmp_root / "data",
         reports_dir=(tmp_root / "data" / "reports"),
         logs_dir=tmp_root / "logs",
+        uploads_dir=(tmp_root / "data" / "uploads"),
         database_file=(tmp_root / "data" / "test.db"),
         history_file=(tmp_root / "data" / "history.json"),
         groups_file=(tmp_root / "data" / "course_groups.json"),
@@ -253,6 +262,77 @@ def test_announcement_job_route_resolves_group_ids_into_courses(app, monkeypatch
     assert response.status_code == 202
     assert captured["payload"]["course_ids_text"] == "101\n202"
     assert captured["payload"]["course_refs"] == ["101", "202"]
+
+
+def test_announcement_job_route_accepts_multipart_attachment(app, monkeypatch):
+    client = app.test_client()
+    services = app.extensions["services"]
+
+    monkeypatch.setattr(services["connection_service"], "build_client", lambda payload: FakeCourseLookupClient())
+    services["course_service"].add_registered_course(
+        {"course_ref": "101", "base_url": "https://canvas.example.com", "access_token": "token"}
+    )
+
+    captured = {}
+
+    def fake_start_background(job_id, fn, payload):
+        captured["payload"] = payload
+
+    services["job_manager"].start_background = fake_start_background
+
+    response = client.post(
+        "/api/announcements/jobs",
+        data={
+            "payload_json": json.dumps(
+                {
+                    "base_url": "https://canvas.example.com",
+                    "access_token": "token",
+                    "target_mode": "courses",
+                    "course_refs": ["101"],
+                    "title": "Aviso",
+                    "message_html": "<p>Teste</p>",
+                    "publish_mode": "publish_now",
+                }
+            ),
+            "attachment": (io.BytesIO(b"pdf"), "aviso.pdf"),
+        },
+        content_type="multipart/form-data",
+    )
+
+    assert response.status_code == 202
+    assert captured["payload"]["course_ids_text"] == "101"
+    assert captured["payload"]["attachment_name"] == "aviso.pdf"
+    assert captured["payload"]["attachment_size"] == 3
+    assert captured["payload"]["attachment_temp_path"]
+
+
+def test_announcement_preflight_returns_course_summary(app, monkeypatch):
+    client = app.test_client()
+    services = app.extensions["services"]
+    monkeypatch.setattr(services["connection_service"], "build_client", lambda payload: FakeCourseLookupClient())
+    services["course_service"].add_registered_course(
+        {"course_ref": "101", "base_url": "https://canvas.example.com", "access_token": "token"}
+    )
+
+    response = client.post(
+        "/api/announcements/preflight",
+        json={
+            "base_url": "https://canvas.example.com",
+            "access_token": "token",
+            "target_mode": "courses",
+            "course_refs": ["101"],
+            "title": "Aviso",
+            "message_html": "<p>Teste</p>",
+            "publish_mode": "publish_now",
+            "lock_comment": True,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["summary"]["courses_requested"] == 1
+    assert payload["summary"]["success_count"] == 1
+    assert payload["courses"][0]["course_name"] == "Curso 101"
 
 
 def test_message_job_route_resolves_all_groups_without_duplicates(app, monkeypatch):
@@ -413,14 +493,56 @@ def test_reports_analytics_endpoint_returns_collapsible_sections_shape(app):
         },
     )
 
+    engagement_job = services["job_manager"].create_job(
+        kind="engagement",
+        title="Inativos Analitico",
+        summary={"course_refs": ["202"], "group_ids": [group["id"]]},
+    )
+    services["job_manager"].complete(
+        engagement_job["id"],
+        result={
+            "summary": {"success_count": 1, "failure_count": 0},
+            "course_results": [
+                {
+                    "course_ref": "202",
+                    "course_id": 202,
+                    "course_name": "Curso 202",
+                    "status": "success",
+                    "students_found": 6,
+                    "recipients_targeted": 3,
+                    "recipients_sent": 3,
+                }
+            ],
+        },
+    )
+
+    with services["database"].session_scope() as session:
+        row = session.scalar(select(JobRun).where(JobRun.public_id == announcement_job["id"]))
+        shifted = datetime.now(UTC) - timedelta(days=40)
+        row.created_at = shifted
+        row.started_at = shifted
+        row.finished_at = shifted + timedelta(minutes=2)
+
     response = client.get("/api/reports/analytics?days=30")
     assert response.status_code == 200
     payload = response.get_json()
     assert payload["overview"]["total_jobs"] == 2
+    assert payload["overview"]["comparison"]["total_jobs"]["previous"] == 1
+    assert payload["overview"]["comparison"]["total_jobs"]["delta"] == 1
+    assert payload["overview"]["comparison"]["total_recipients_sent"]["current"] == 11
+    assert payload["overview"]["comparison"]["total_announcements_created"]["previous"] == 1
+    assert "executive" in payload
+    assert payload["executive"]["alerts"]
+    assert payload["executive"]["highlights"]
+    assert any(item["level"] in {"warning", "error"} for item in payload["executive"]["alerts"])
+    assert "period_comparison" in payload["sections"]
     assert "operational" in payload["sections"]
     assert "top_courses" in payload["sections"]
     assert "recent_failures" in payload["sections"]
     assert payload["sections"]["top_groups"]["items"][0]["group_name"] == "Grupo Analitico"
+    announcement_row = next(item for item in payload["sections"]["operational"]["items"] if item["kind"] == "announcement")
+    assert announcement_row["current_jobs"] == 0
+    assert announcement_row["previous_jobs"] == 1
 
 
 def test_database_wipe_endpoint_hard_deletes_everything(app, monkeypatch):

@@ -1,0 +1,13 @@
+{
+  "name": "canvas-bulk-panel",
+  "private": true,
+  "scripts": {
+    "ui:audit": "playwright test",
+    "ui:audit:headed": "playwright test --headed",
+    "ui:audit:report": "playwright show-report ui-audit/report/html"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "^4.11.1",
+    "@playwright/test": "^1.59.1"
+  }
+}

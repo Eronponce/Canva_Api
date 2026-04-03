@@ -26,6 +26,7 @@ def isolated_env(tmp_path, monkeypatch):
     monkeypatch.delenv("CANVAS_API_TOKEN", raising=False)
     monkeypatch.delenv("DATABASE_URL", raising=False)
     monkeypatch.delenv("MYSQL_URL", raising=False)
+    monkeypatch.setenv("SCHEDULER_ENABLED", "0")
     return {"data_dir": data_dir, "logs_dir": logs_dir, "env_file": env_file}
 
 

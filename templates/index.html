@@ -39,29 +39,36 @@
             <small>anuncios</small>
           </span>
         </button>
-        <button class="tab-button" data-tab="messages" type="button">
+        <button class="tab-button" data-tab="recurrence" type="button">
           <span class="tab-step">04</span>
+          <span class="tab-copy">
+            <strong>Recorrencia</strong>
+            <small>avisos agendados</small>
+          </span>
+        </button>
+        <button class="tab-button" data-tab="messages" type="button">
+          <span class="tab-step">05</span>
           <span class="tab-copy">
             <strong>Caixa de entrada</strong>
             <small>mensagens</small>
           </span>
         </button>
         <button class="tab-button" data-tab="engagement" type="button">
-          <span class="tab-step">05</span>
+          <span class="tab-step">06</span>
           <span class="tab-copy">
             <strong>Inativos</strong>
             <small>mensagem automatica</small>
           </span>
         </button>
         <button class="tab-button" data-tab="settings" type="button">
-          <span class="tab-step">06</span>
+          <span class="tab-step">07</span>
           <span class="tab-copy">
             <strong>Configuracoes</strong>
             <small>.env local</small>
           </span>
         </button>
         <button class="tab-button" data-tab="reports" type="button">
-          <span class="tab-step">07</span>
+          <span class="tab-step">08</span>
           <span class="tab-copy">
             <strong>Relatorios</strong>
             <small>historico e csv</small>
@@ -79,7 +86,7 @@
             <div class="card-header">
               <div>
                 <h2>Conexao com o Canvas</h2>
-                <p>Use esta etapa para validar ambiente, token e usuario autenticado.</p>
+                <p>Valide ambiente, token e usuario antes de seguir.</p>
               </div>
               <span id="connectionStatusBadge" class="status-chip status-info">nao testado</span>
             </div>
@@ -114,7 +121,7 @@
             <div class="card-header">
               <div>
                 <h2>Resultado da conexao</h2>
-                <p>Resumo do ambiente ativo e do usuario autenticado.</p>
+                <p>Confira URL, usuario autenticado e origem do token.</p>
               </div>
             </div>
             <div id="connectionResult" class="connection-result">
@@ -130,7 +137,7 @@
             <div class="card-header">
               <div>
                 <h2>Cursos cadastrados</h2>
-                <p>Digite o numero do curso. O sistema consulta o Canvas e salva tambem o nome do curso.</p>
+                <p>Digite o numero do curso e confirme o cadastro local com nome e codigo.</p>
               </div>
             </div>
 
@@ -145,7 +152,7 @@
               <div class="subsection-header">
                 <div>
                   <h3>Catalogo do Canvas</h3>
-                  <p>Busque os cursos que voce tem acesso, selecione os desejados e cadastre em lote.</p>
+                  <p>Busque no Canvas, selecione os cursos desejados e cadastre em lote.</p>
                 </div>
               </div>
 
@@ -164,7 +171,7 @@
             <div class="card-header">
               <div>
                 <h2>Grupos de turmas</h2>
-                <p>Grupos salvos para reutilizar nos comunicados e nas mensagens.</p>
+                <p>Monte grupos reaproveitaveis para avisos, mensagens e filtros.</p>
               </div>
               <button id="newGroupBtn" class="btn btn-secondary" type="button">Novo grupo</button>
             </div>
@@ -180,7 +187,7 @@
             <div class="card-header">
               <div>
                 <h2>Destino</h2>
-                <p>Escolha grupos salvos ou selecione cursos especificos para montar o lote.</p>
+                <p>Defina o destino do lote usando grupos salvos ou cursos especificos.</p>
               </div>
             </div>
 
@@ -199,25 +206,38 @@
             <div id="announcementGroupPicker" class="picker-shell"></div>
             <div id="announcementCoursePicker" class="picker-shell hidden"></div>
             <div id="announcementTargetSummary" class="summary-grid"></div>
+            <div id="announcementInfoPanel" class="info-panel spaced-top">
+              Escolha grupos salvos ou cursos especificos para ver o resumo operacional do comunicado.
+            </div>
           </article>
 
           <article class="card">
             <div class="card-header">
               <div>
                 <h2>Comunicado</h2>
-                <p>Publica um comunicado em cada turma resolvida usando apenas a API oficial do Canvas.</p>
+                <p>Monte o aviso, revise a amostra e publique por turma via API oficial.</p>
               </div>
             </div>
 
             <form id="announcementForm" class="stack-form">
               <label class="field">
                 <span>Titulo</span>
-                <input id="announcementTitle" type="text" placeholder="Atualizacao importante da disciplina">
+                <input id="announcementTitle" data-template-scope="announcement" type="text" placeholder="Atualizacao importante da disciplina">
               </label>
 
               <label class="field">
                 <span>Mensagem HTML simples</span>
-                <textarea id="announcementMessage" rows="12" placeholder="<p>Ola turma,</p><p>Segue o recado...</p>"></textarea>
+                <textarea id="announcementMessage" data-template-scope="announcement" rows="12" placeholder="<p>Ola turma,</p><p>Segue o recado...</p>"></textarea>
+              </label>
+
+              <div class="template-tools">
+                <div id="announcementTokenPalette" class="token-palette"></div>
+              </div>
+
+              <label class="field">
+                <span>Anexo opcional</span>
+                <input id="announcementAttachment" type="file">
+                <small id="announcementAttachmentMeta" class="field-help">O Canvas aceita o anexo direto na criacao do comunicado.</small>
               </label>
 
               <div class="field-grid">
@@ -259,9 +279,11 @@
               <div class="subsection-header">
                 <div>
                   <h3>Pre-visualizacao</h3>
-                  <p>Confira o HTML renderizado antes de enviar.</p>
+                  <p>Amostra com a primeira turma resolvida no lote atual.</p>
                 </div>
               </div>
+              <div id="announcementTemplateStatus" class="template-status"></div>
+              <div id="announcementPreviewTitle" class="template-preview-headline">Nenhuma turma selecionada para gerar amostra.</div>
               <iframe id="announcementPreview" class="preview-frame" title="Pre-visualizacao do comunicado"></iframe>
             </div>
           </article>
@@ -270,7 +292,7 @@
             <div class="card-header">
               <div>
                 <h2>Logs do lote</h2>
-                <p>Acompanhe andamento, retornos por turma e o CSV final.</p>
+                <p>Veja progresso, retorno por turma e exportacao final.</p>
               </div>
             </div>
             <div id="announcementJobCard" class="job-output empty-state">Nenhum lote de comunicado iniciado.</div>
@@ -284,7 +306,7 @@
             <div class="card-header">
               <div>
                 <h2>Destino</h2>
-                <p>Monte o alvo do envio por grupos salvos ou por cursos especificos.</p>
+                <p>Defina o alvo do envio por grupos salvos ou cursos especificos.</p>
               </div>
             </div>
 
@@ -303,25 +325,38 @@
             <div id="messageGroupPicker" class="picker-shell"></div>
             <div id="messageCoursePicker" class="picker-shell hidden"></div>
             <div id="messageTargetSummary" class="summary-grid"></div>
+            <div id="messageFlowHint" class="info-panel spaced-top">
+              Revise a estrategia e a personalizacao antes de abrir a revisao final do envio.
+            </div>
           </article>
 
           <article class="card">
             <div class="card-header">
               <div>
                 <h2>Mensagem</h2>
-                <p>Envia mensagens pela caixa de entrada do Canvas para os alunos das turmas escolhidas.</p>
+                <p>Monte a mensagem, revise a amostra e envie pela caixa de entrada do Canvas.</p>
               </div>
             </div>
 
             <form id="messageForm" class="stack-form">
               <label class="field">
                 <span>Assunto</span>
-                <input id="messageSubject" type="text" placeholder="Aviso importante">
+                <input id="messageSubject" data-template-scope="message" type="text" placeholder="Aviso importante">
               </label>
 
               <label class="field">
                 <span>Mensagem</span>
-                <textarea id="messageBody" rows="12" placeholder="Ola turma,&#10;&#10;Estou enviando este aviso para todos os alunos..."></textarea>
+                <textarea id="messageBody" data-template-scope="message" rows="12" placeholder="Ola turma,&#10;&#10;Estou enviando este aviso para todos os alunos..."></textarea>
+              </label>
+
+              <div class="template-tools">
+                <div id="messageTokenPalette" class="token-palette"></div>
+              </div>
+
+              <label class="field">
+                <span>Anexo opcional</span>
+                <input id="messageAttachment" type="file">
+                <small id="messageAttachmentMeta" class="field-help">O arquivo sera enviado para o Canvas e reaproveitado no lote da caixa de entrada.</small>
               </label>
 
               <label class="field">
@@ -351,13 +386,24 @@
                 <button class="btn btn-primary" type="submit">Enviar mensagem</button>
               </div>
             </form>
+
+            <div class="card-subsection">
+              <div class="subsection-header">
+                <div>
+                  <h3>Pre-visualizacao</h3>
+                  <p>Amostra com a primeira turma resolvida e, quando houver, um aluno de exemplo.</p>
+                </div>
+              </div>
+              <div id="messageTemplateStatus" class="template-status"></div>
+              <div id="messagePreviewPanel" class="message-preview-panel empty-state">Selecione uma turma para gerar a amostra da caixa de entrada.</div>
+            </div>
           </article>
 
           <article class="card span-two">
             <div class="card-header">
               <div>
                 <h2>Resumo e destinatarios</h2>
-                <p>Veja rapidamente quais turmas entram no lote atual.</p>
+                <p>Resumo rapido do lote antes da revisao final.</p>
               </div>
             </div>
             <div id="messageInfoPanel" class="info-panel">
@@ -370,11 +416,167 @@
           <div class="card-header">
             <div>
               <h2>Resultado do envio</h2>
-              <p>Mostra alunos encontrados, envios realizados e falhas por turma.</p>
+              <p>Resultado consolidado com destinatarios, envios e falhas por turma.</p>
             </div>
           </div>
           <div id="messageJobCard" class="job-output empty-state">Nenhum lote de caixa de entrada iniciado.</div>
         </article>
+      </section>
+
+      <section id="tab-recurrence" class="tab-panel">
+        <div class="panel-grid panel-grid-recurrence">
+          <article class="card">
+            <div class="card-header">
+              <div>
+                <h2>Destino</h2>
+                <p>Escolha onde a recorrencia vai publicar os avisos futuros.</p>
+              </div>
+            </div>
+
+            <div class="mode-switch" id="recurrenceModeSwitch">
+              <button class="mode-button active" type="button" data-kind="recurrence" data-mode="groups">Grupos salvos</button>
+              <button class="mode-button" type="button" data-kind="recurrence" data-mode="courses">Cursos especificos</button>
+              <label class="switch-line" id="recurrenceAllGroupsLine">
+                <input id="recurrenceAllGroups" class="switch-input" type="checkbox">
+                <span class="switch-track" aria-hidden="true"></span>
+                <span class="switch-copy">Usar todos os grupos</span>
+              </label>
+            </div>
+
+            <div id="recurrenceGroupPicker" class="picker-shell"></div>
+            <div id="recurrenceCoursePicker" class="picker-shell hidden"></div>
+            <div id="recurrenceTargetSummary" class="summary-grid"></div>
+          </article>
+
+          <article class="card">
+            <div class="card-header">
+              <div>
+                <h2>Configuracao</h2>
+                <p>Configure a base da recorrencia e gere os avisos futuros diretamente no Canvas.</p>
+              </div>
+            </div>
+
+            <form id="recurrenceForm" class="stack-form">
+              <label class="field">
+                <span>Nome interno</span>
+                <input id="recurrenceName" type="text" placeholder="Ex.: Encontro semanal quinta 19h">
+              </label>
+
+              <label class="field">
+                <span>Titulo do aviso</span>
+                <input id="recurrenceTitle" data-template-scope="recurrence" type="text" placeholder="Encontro semanal da disciplina">
+              </label>
+
+              <label class="field">
+                <span>Mensagem HTML simples</span>
+                <textarea id="recurrenceMessage" data-template-scope="recurrence" rows="10" placeholder="<p>Ola turma,</p><p>Nosso encontro acontece hoje as 19h.</p>"></textarea>
+              </label>
+
+              <div class="template-tools">
+                <div id="recurrenceTokenPalette" class="token-palette"></div>
+              </div>
+
+              <div class="field-grid">
+                <label class="field">
+                  <span>Frequencia</span>
+                  <select id="recurrenceType">
+                    <option value="weekly">Semanal</option>
+                    <option value="daily">Diaria</option>
+                  </select>
+                </label>
+
+                <label class="field">
+                  <span>Intervalo</span>
+                  <input id="recurrenceInterval" type="number" min="1" value="1">
+                </label>
+              </div>
+
+              <div class="field-grid">
+                <label class="field">
+                  <span>Primeira publicacao</span>
+                  <input id="recurrenceFirstPublishAt" type="datetime-local">
+                </label>
+
+                <label class="field">
+                  <span>Quantidade de ocorrencias</span>
+                  <input id="recurrenceOccurrences" type="number" min="1" value="8">
+                </label>
+              </div>
+
+              <div class="switch-stack">
+                <label class="switch-line">
+                  <input id="recurrenceLockComment" class="switch-input" type="checkbox">
+                  <span class="switch-track" aria-hidden="true"></span>
+                  <span class="switch-copy">Bloquear comentarios nos avisos</span>
+                </label>
+              </div>
+
+              <div class="button-row">
+                <button id="previewRecurrenceBtn" class="btn btn-secondary" type="button">Prever datas</button>
+                <button id="submitRecurrenceBtn" class="btn btn-primary" type="submit">Criar recorrencia</button>
+              </div>
+            </form>
+
+            <div class="card-subsection">
+              <div class="subsection-header">
+                <div>
+                  <h3>Previsao</h3>
+                  <p>Revise datas, impacto e amostra antes de criar ou editar.</p>
+                </div>
+              </div>
+              <div id="recurrenceInfoPanel" class="info-panel">
+                Clique em prever datas para validar o lote antes de abrir a revisao final.
+              </div>
+              <div id="recurrenceTemplateStatus" class="template-status"></div>
+              <div id="recurrencePreviewState" class="field-help"></div>
+              <div id="recurrenceMessagePreview" class="message-preview-panel empty-state">Selecione as turmas para gerar a amostra da recorrencia.</div>
+              <div id="recurrencePreviewSummary" class="summary-grid"></div>
+              <div id="recurrenceSchedulePreview" class="compact-list empty-state" tabindex="0" aria-label="Previsao de publicacoes da recorrencia">Selecione as turmas e clique em prever datas.</div>
+            </div>
+          </article>
+
+          <article class="card span-two">
+            <div class="card-header">
+              <div>
+                <h2>Agenda das proximas publicacoes</h2>
+                <p>Agenda cronologica das proximas publicacoes ainda pendentes no Canvas.</p>
+              </div>
+            </div>
+            <div class="inline-form">
+              <input id="recurrenceAgendaSearch" type="text" placeholder="Buscar por recorrencia, titulo ou turma" aria-label="Buscar proximas publicacoes recorrentes">
+              <select id="recurrenceAgendaWindow" aria-label="Janela da agenda de recorrencia">
+                <option value="7">Proximos 7 dias</option>
+                <option value="30" selected>Proximos 30 dias</option>
+                <option value="60">Proximos 60 dias</option>
+                <option value="180">Proximos 180 dias</option>
+              </select>
+            </div>
+            <div id="recurrenceAgendaSummary" class="summary-grid spaced-top"></div>
+            <div id="recurrenceAgendaList" class="compact-list empty-state" tabindex="0" aria-label="Lista de proximas publicacoes recorrentes">Nenhuma publicacao futura encontrada.</div>
+          </article>
+
+          <article class="card span-two">
+            <div class="card-header">
+              <div>
+                <h2>Recorrencias criadas</h2>
+                <p>Gerencie recorrencias ativas, futuras e canceladas sem mexer no que ja foi publicado.</p>
+              </div>
+            </div>
+            <div class="inline-form">
+              <input id="recurrenceListSearch" type="text" placeholder="Buscar por nome, titulo, turma ou codigo" aria-label="Buscar recorrencias criadas">
+              <select id="recurrenceListStatus" aria-label="Filtrar recorrencias por status">
+                <option value="all">Todos os status</option>
+                <option value="active">Ativas</option>
+                <option value="inactive">Inativas</option>
+                <option value="error">Com erro</option>
+                <option value="upcoming">Com publicacoes futuras</option>
+                <option value="canceled">Canceladas</option>
+              </select>
+            </div>
+            <div id="recurrenceListSummary" class="summary-grid spaced-top"></div>
+            <div id="recurrenceList" class="compact-list empty-state" tabindex="0" aria-label="Lista de recorrencias criadas">Nenhuma recorrencia criada.</div>
+          </article>
+        </div>
       </section>
 
       <section id="tab-engagement" class="tab-panel">
@@ -383,7 +585,7 @@
             <div class="card-header">
               <div>
                 <h2>Enviar mensagem para alunos inativos</h2>
-                <p>Selecione as turmas, defina o filtro e carregue a quantidade por turma antes do envio.</p>
+                <p>Escolha as turmas, aplique o filtro e carregue o alvo antes de enviar.</p>
               </div>
             </div>
 
@@ -413,6 +615,45 @@
                   </select>
                 </label>
 
+                <label class="field">
+                  <span>Combinar regras com</span>
+                  <select id="engagementMatchMode">
+                    <option value="or">OU</option>
+                    <option value="and">E</option>
+                  </select>
+                </label>
+
+                <div class="field-grid">
+                  <label class="field">
+                    <span>Sem atividade ha</span>
+                    <input id="engagementInactiveDays" type="number" min="0" placeholder="Ex.: 14">
+                    <small class="field-help">Usa `last_activity_at` dos enrollments.</small>
+                  </label>
+                  <label class="field">
+                    <span>Atividade total ate</span>
+                    <input id="engagementMaxActivityMinutes" type="number" min="0" placeholder="Minutos">
+                    <small class="field-help">Usa `total_activity_time` do Canvas.</small>
+                  </label>
+                </div>
+
+                <div class="switch-stack">
+                  <label class="switch-line">
+                    <input id="engagementOnlyModules" class="switch-input" type="checkbox">
+                    <span class="switch-track" aria-hidden="true"></span>
+                    <span class="switch-copy">Exigir cursos com requisitos de modulos</span>
+                  </label>
+                  <label class="switch-line">
+                    <input id="engagementRequireNeverAccessed" class="switch-input" type="checkbox">
+                    <span class="switch-track" aria-hidden="true"></span>
+                    <span class="switch-copy">Exigir sem acesso nenhum</span>
+                  </label>
+                  <label class="switch-line">
+                    <input id="engagementRequireIncomplete" class="switch-input" type="checkbox">
+                    <span class="switch-track" aria-hidden="true"></span>
+                    <span class="switch-copy">Exigir recursos pendentes</span>
+                  </label>
+                </div>
+
                 <div class="button-row">
                   <button id="previewEngagementBtn" class="btn btn-secondary" type="button">Buscar quantidade por turma</button>
                 </div>
@@ -426,42 +667,37 @@
             <div class="card-header">
               <div>
                 <h2>Resumo da selecao</h2>
-                <p>Depois da busca, aqui aparece quantas turmas e quantos alunos entram no envio.</p>
+                <p>Resumo consolidado da busca antes da mensagem.</p>
               </div>
             </div>
             <div id="engagementTargetSummary" class="summary-grid"></div>
           </article>
 
-          <article class="card">
-            <div class="card-header">
-              <div>
-                <h2>Quem vai receber</h2>
-                <p>Confira a quantidade por turma e os alunos encontrados antes de enviar.</p>
-              </div>
-            </div>
-            <div id="engagementPreviewCard" class="job-output empty-state">Selecione as turmas e clique em buscar para ver quem entra no envio.</div>
-          </article>
-
-          <article class="card">
+          <article class="card span-two">
             <div class="card-header">
               <div>
                 <h2>Mensagem</h2>
-                <p>O envio acontece aluno por aluno, sempre no contexto do curso correspondente.</p>
+                <p>Escreva a mensagem com variaveis seguras e valide a amostra antes do disparo.</p>
               </div>
             </div>
             <form id="engagementForm" class="stack-form">
               <label class="field">
                 <span>Assunto</span>
-                <input id="engagementSubject" type="text" placeholder="Acompanhamento de acesso ao curso">
+                <input id="engagementSubject" data-template-scope="engagement" type="text" placeholder="Acompanhamento de acesso ao curso">
               </label>
 
               <label class="field">
                 <span>Mensagem</span>
                 {% raw %}
-                <textarea id="engagementMessage" rows="12" placeholder="Ola {{student_name}},&#10;&#10;Percebemos que no curso {{course_name}} voce esta com o seguinte status: {{reason}}."></textarea>
-                <small class="field-help">Placeholders disponiveis: {{student_name}}, {{course_name}}, {{course_ref}}, {{reason}}</small>
+                <textarea id="engagementMessage" data-template-scope="engagement" rows="12" placeholder="Ola {{student_name}},&#10;&#10;Percebemos que no curso {{course_name}} voce esta com o seguinte status: {{reason}}."></textarea>
                 {% endraw %}
               </label>
+
+              <div class="template-tools">
+                <div id="engagementTokenPalette" class="token-palette"></div>
+              </div>
+              <div id="engagementTemplateStatus" class="template-status"></div>
+              <div id="engagementMessagePreview" class="message-preview-panel empty-state">Busque os alunos para gerar uma amostra da mensagem para inativos.</div>
 
               <div class="switch-stack">
                 <label class="switch-line">
@@ -480,8 +716,18 @@
           <article class="card span-two">
             <div class="card-header">
               <div>
+                <h2>Quem vai receber</h2>
+                <p>Veja turmas e alunos encontrados, ja ordenados por prioridade de acao.</p>
+              </div>
+            </div>
+            <div id="engagementPreviewCard" class="job-output empty-state">Selecione as turmas e clique em buscar para ver quem entra no envio.</div>
+          </article>
+
+          <article class="card span-two">
+            <div class="card-header">
+              <div>
                 <h2>Resultado do envio</h2>
-                <p>Acompanhe o lote, baixe o CSV e veja o consolidado por turma.</p>
+                <p>Acompanhe o lote e baixe o CSV consolidado por turma.</p>
               </div>
             </div>
             <div id="engagementJobCard" class="job-output empty-state">Nenhum lote de alunos inativos iniciado.</div>
@@ -495,7 +741,7 @@
             <div class="card-header">
               <div>
                 <h2>Editor do .env</h2>
-                <p>Revele o arquivo por alguns segundos para consultar ou editar com mais seguranca.</p>
+                <p>Revele por poucos segundos para consultar ou editar com seguranca.</p>
               </div>
             </div>
 
@@ -526,7 +772,7 @@
             <div class="card-header">
               <div>
                 <h2>Configuracao operacional</h2>
-                <p>Resumo das configuracoes carregadas e dos endpoints oficiais em uso.</p>
+                <p>Veja o ambiente carregado e os endpoints oficiais usados pelo painel.</p>
               </div>
             </div>
 
@@ -542,9 +788,11 @@
               <code>GET /api/v1/courses</code>
               <code>GET /api/v1/courses/:course_id</code>
               <code>GET /api/v1/courses/:course_id/users?enrollment_type[]=student</code>
+              <code>GET /api/v1/courses/:course_id/enrollments?type[]=StudentEnrollment</code>
               <code>GET /api/v1/courses/:course_id/analytics/student_summaries</code>
               <code>GET /api/v1/courses/:course_id/bulk_user_progress</code>
               <code>POST /api/v1/courses/:course_id/discussion_topics</code>
+              <code>DELETE /api/v1/courses/:course_id/discussion_topics/:topic_id</code>
               <code>GET /api/v1/search/recipients</code>
               <code>POST /api/v1/conversations</code>
             </div>
@@ -552,7 +800,7 @@
             <div class="card-header spaced-top">
               <div>
                 <h2>Zona de perigo</h2>
-                <p>Remove de forma permanente cursos, grupos, historico, logs e resultados salvos no banco SQLite do painel.</p>
+                <p>Apaga de forma permanente os dados operacionais salvos no banco local do painel.</p>
               </div>
             </div>
             <div class="danger-zone">
@@ -578,7 +826,7 @@
           <div class="card-header">
             <div>
               <h2>Analitico por periodo</h2>
-              <p>Consolidado operacional para acompanhar volume, falhas, grupos e cursos mais acionados.</p>
+                <p>Compare o periodo atual com o anterior e acompanhe volume, tendencia e alertas.</p>
             </div>
             <div class="button-row">
               <label class="field report-period-field">
@@ -594,6 +842,8 @@
             </div>
           </div>
 
+          <div id="reportExecutiveAlerts" class="executive-alerts-grid"></div>
+          <div id="reportExecutiveHighlights" class="executive-highlights-grid"></div>
           <div class="metrics-grid" id="reportMetrics"></div>
           <div id="reportAnalyticsSections" class="report-sections"></div>
         </article>
@@ -603,7 +853,7 @@
             <div class="card-header">
               <div>
                 <h2>Historico de envios</h2>
-                <p>Relatorios recentes com acesso rapido ao detalhe e ao CSV.</p>
+                <p>Historico recente com acesso rapido ao detalhe e ao CSV.</p>
               </div>
               <button id="refreshHistoryBtn" class="btn btn-secondary" type="button">Atualizar</button>
             </div>
@@ -614,7 +864,7 @@
             <div class="card-header">
               <div>
                 <h2>Detalhe do relatorio</h2>
-                <p>Resumo do job selecionado e resultados por turma.</p>
+                <p>Resumo do job selecionado com detalhamento por turma.</p>
               </div>
             </div>
             <div id="historyDetail" class="history-detail empty-state">Selecione um relatorio para ver os detalhes.</div>
@@ -657,6 +907,245 @@
       <div class="button-row">
         <button id="saveGroupBtn" class="btn btn-primary" type="button">Salvar grupo</button>
         <button id="cancelGroupModalBtn" class="btn btn-secondary" type="button">Cancelar</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="sendReviewModal" class="modal hidden" aria-hidden="true">
+    <div class="modal-backdrop" data-action="close-send-review-modal"></div>
+    <div class="modal-dialog modal-wide">
+      <div class="card-header">
+        <div>
+          <h2 id="sendReviewTitle">Revisar envio</h2>
+          <p id="sendReviewSubtitle">Ultima revisao antes de disparar o lote.</p>
+        </div>
+        <button id="closeSendReviewModalBtn" class="mini-btn ghost" type="button">Fechar</button>
+      </div>
+
+      <div id="sendReviewNotice" class="notice hidden"></div>
+
+      <div class="summary-grid" id="sendReviewSummary"></div>
+
+      <div class="review-grid">
+        <article class="card review-card">
+          <div class="card-header compact-header">
+            <div>
+              <h3>Alvo do envio</h3>
+              <p id="sendReviewTargetSubtitle">Alvo resolvido para este envio.</p>
+            </div>
+          </div>
+          <div id="sendReviewTargets" class="compact-list empty-state">Nenhum alvo carregado.</div>
+        </article>
+
+        <article class="card review-card">
+          <div class="card-header compact-header">
+            <div>
+              <h3>Mensagem</h3>
+              <p id="sendReviewMessageSubtitle">Conteudo final que sera disparado.</p>
+            </div>
+          </div>
+          <div id="sendReviewMessage" class="review-message-box empty-state">Nenhum conteudo carregado.</div>
+        </article>
+      </div>
+
+      <div class="button-row">
+        <button id="confirmSendReviewBtn" class="btn btn-primary" type="button">Confirmar envio</button>
+        <button id="cancelSendReviewBtn" class="btn btn-secondary" type="button">Cancelar</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="recurrenceEditModal" class="modal hidden" aria-hidden="true">
+    <div class="modal-backdrop" data-action="close-recurrence-edit-modal"></div>
+    <div class="modal-dialog modal-wide">
+      <div class="card-header">
+        <div>
+          <h2 id="recurrenceEditModalTitle">Editar recorrencia</h2>
+          <p>Edite turmas, datas e conteudo sem misturar com a criacao de uma nova base.</p>
+        </div>
+        <button id="closeRecurrenceEditModalBtn" class="mini-btn ghost" type="button">Fechar</button>
+      </div>
+
+      <div id="recurrenceEditNotice" class="notice hidden"></div>
+
+      <div class="review-grid">
+        <article class="card review-card">
+          <div class="card-header compact-header">
+            <div>
+              <h3>Destino e configuracao</h3>
+              <p>Ajuste destino, datas e mensagem em um fluxo isolado de edicao.</p>
+            </div>
+          </div>
+
+          <div class="mode-switch" id="recurrenceEditModeSwitch">
+            <button class="mode-button active" type="button" data-kind="recurrenceEdit" data-mode="groups">Grupos salvos</button>
+            <button class="mode-button" type="button" data-kind="recurrenceEdit" data-mode="courses">Cursos especificos</button>
+            <label class="switch-line" id="recurrenceEditAllGroupsLine">
+              <input id="recurrenceEditAllGroups" class="switch-input" type="checkbox">
+              <span class="switch-track" aria-hidden="true"></span>
+              <span class="switch-copy">Usar todos os grupos</span>
+            </label>
+          </div>
+
+          <div id="recurrenceEditGroupPicker" class="picker-shell"></div>
+          <div id="recurrenceEditCoursePicker" class="picker-shell hidden"></div>
+          <div id="recurrenceEditTargetSummary" class="summary-grid"></div>
+
+          <form id="recurrenceEditForm" class="stack-form spaced-top">
+            <label class="field">
+              <span>Nome interno</span>
+              <input id="recurrenceEditName" type="text" placeholder="Ex.: Encontro semanal quinta 19h">
+            </label>
+
+            <label class="field">
+              <span>Titulo do aviso</span>
+              <input id="recurrenceEditTitle" data-template-scope="recurrenceEdit" type="text" placeholder="Encontro semanal da disciplina">
+            </label>
+
+            <label class="field">
+              <span>Mensagem HTML simples</span>
+              <textarea id="recurrenceEditMessage" data-template-scope="recurrenceEdit" rows="9" placeholder="<p>Ola turma,</p><p>Nosso encontro acontece hoje as 19h.</p>"></textarea>
+            </label>
+
+            <div class="template-tools">
+              <div id="recurrenceEditTokenPalette" class="token-palette"></div>
+            </div>
+
+            <div class="field-grid">
+              <label class="field">
+                <span>Frequencia</span>
+                <select id="recurrenceEditType">
+                  <option value="weekly">Semanal</option>
+                  <option value="daily">Diaria</option>
+                </select>
+              </label>
+
+              <label class="field">
+                <span>Intervalo</span>
+                <input id="recurrenceEditInterval" type="number" min="1" value="1">
+              </label>
+            </div>
+
+            <div class="field-grid">
+              <label class="field">
+                <span>Primeira publicacao</span>
+                <input id="recurrenceEditFirstPublishAt" type="datetime-local">
+              </label>
+
+              <label class="field">
+                <span>Quantidade de ocorrencias</span>
+                <input id="recurrenceEditOccurrences" type="number" min="1" value="8">
+              </label>
+            </div>
+
+            <div class="switch-stack">
+              <label class="switch-line">
+                <input id="recurrenceEditLockComment" class="switch-input" type="checkbox">
+                <span class="switch-track" aria-hidden="true"></span>
+                <span class="switch-copy">Bloquear comentarios nos avisos</span>
+              </label>
+            </div>
+
+            <div class="button-row">
+              <button id="previewRecurrenceEditBtn" class="btn btn-secondary" type="button">Prever impacto</button>
+              <button id="saveRecurrenceEditBtn" class="btn btn-primary" type="submit">Salvar ajustes</button>
+              <button id="cancelRecurrenceEditBtn" class="btn btn-secondary" type="button">Cancelar</button>
+            </div>
+          </form>
+        </article>
+
+        <article class="card review-card">
+          <div class="card-header compact-header">
+            <div>
+              <h3>Impacto da edicao</h3>
+              <p>Confira o impacto por turma antes de aplicar a edicao.</p>
+            </div>
+          </div>
+          <div id="recurrenceEditInfoPanel" class="info-panel">
+            Gere um preview atualizado antes de salvar a edicao da recorrencia.
+          </div>
+          <div id="recurrenceEditTemplateStatus" class="template-status"></div>
+          <div id="recurrenceEditPreviewState" class="field-help"></div>
+          <div id="recurrenceEditMessagePreview" class="message-preview-panel empty-state">Carregue a recorrencia para gerar a amostra.</div>
+          <div id="recurrenceEditPreviewSummary" class="summary-grid"></div>
+          <div id="recurrenceEditSchedulePreview" class="compact-list empty-state" tabindex="0" aria-label="Impacto da edicao nas publicacoes futuras">Clique em prever impacto para ver o que muda nas publicacoes futuras.</div>
+        </article>
+      </div>
+    </div>
+  </div>
+
+  <div id="recurrenceReviewModal" class="modal hidden" aria-hidden="true">
+    <div class="modal-backdrop" data-action="close-recurrence-review-modal"></div>
+    <div class="modal-dialog modal-wide">
+      <div class="card-header">
+        <div>
+          <h2 id="recurrenceReviewTitle">Revisar recorrencia</h2>
+          <p id="recurrenceReviewSubtitle">Revise o impacto antes de aplicar os avisos futuros no Canvas.</p>
+        </div>
+        <button id="closeRecurrenceReviewModalBtn" class="mini-btn ghost" type="button">Fechar</button>
+      </div>
+
+      <div id="recurrenceReviewNotice" class="notice hidden"></div>
+      <div id="recurrenceReviewSummary" class="summary-grid"></div>
+
+      <div class="review-grid">
+        <article class="card review-card">
+          <div class="card-header compact-header">
+            <div>
+              <h3>Destino</h3>
+              <p>Destino final resolvido para esta recorrencia.</p>
+            </div>
+          </div>
+          <div id="recurrenceReviewTargets" class="compact-list empty-state">Nenhuma turma carregada.</div>
+        </article>
+
+        <article class="card review-card">
+          <div class="card-header compact-header">
+            <div>
+              <h3>Agenda prevista</h3>
+              <p>Agenda futura calculada para esta revisao.</p>
+            </div>
+          </div>
+          <div id="recurrenceReviewSchedule" class="compact-list empty-state">Nenhuma previsao carregada.</div>
+        </article>
+      </div>
+
+      <div class="button-row">
+        <button id="confirmRecurrenceReviewBtn" class="btn btn-primary" type="button">Confirmar recorrencia</button>
+        <button id="cancelRecurrenceReviewBtn" class="btn btn-secondary" type="button">Cancelar</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="recurrenceCancelModal" class="modal hidden" aria-hidden="true">
+    <div class="modal-backdrop" data-action="close-recurrence-cancel-modal"></div>
+    <div class="modal-dialog">
+      <div class="card-header">
+        <div>
+          <h2>Cancelar avisos futuros</h2>
+          <p>Remove do Canvas somente os avisos futuros desta recorrencia.</p>
+        </div>
+        <button id="closeRecurrenceCancelModalBtn" class="mini-btn ghost" type="button">Fechar</button>
+      </div>
+
+      <div id="recurrenceCancelNotice" class="notice hidden"></div>
+      <div id="recurrenceCancelSummary" class="summary-grid"></div>
+
+      <div class="stack-form spaced-top">
+        <label class="field">
+          <span>Motivo do cancelamento</span>
+          <textarea id="recurrenceCancelReason" rows="4" placeholder="Ex.: Mudanca de agenda"></textarea>
+        </label>
+
+        <label class="field">
+          <span>Digite CANCELAR para confirmar</span>
+          <input id="recurrenceCancelConfirm" type="text" placeholder="CANCELAR">
+        </label>
+      </div>
+
+      <div class="button-row">
+        <button id="confirmRecurrenceCancelBtn" class="btn btn-danger" type="button">Cancelar avisos futuros</button>
+        <button id="cancelRecurrenceCancelBtn" class="btn btn-secondary" type="button">Voltar</button>
       </div>
     </div>
   </div>

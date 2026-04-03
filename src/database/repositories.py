@@ -1,13 +1,25 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
+from zoneinfo import ZoneInfo
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, inspect, select, text, update
 from sqlalchemy.orm import selectinload
 
-from src.database.models import Course, CourseGroup, GroupCourse, JobCourseResult, JobLog, JobRun, JobTargetCourse, JobTargetGroup
+from src.database.models import (
+    AnnouncementRecurrence,
+    AnnouncementRecurrenceItem,
+    Course,
+    CourseGroup,
+    GroupCourse,
+    JobCourseResult,
+    JobLog,
+    JobRun,
+    JobTargetCourse,
+    JobTargetGroup,
+)
 from src.utils.time_utils import datetime_to_iso, utc_now
 
 
@@ -29,6 +41,30 @@ def _soft_delete_fields(*, active: bool) -> dict:
         "deleted_at": now,
         "updated_at": now,
     }
+
+
+def _as_utc(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
+
+
+def _with_timezone(value: datetime | None, timezone_name: str | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        try:
+            return value.replace(tzinfo=ZoneInfo(timezone_name or "UTC"))
+        except Exception:  # noqa: BLE001
+            return value.replace(tzinfo=UTC)
+    if timezone_name:
+        try:
+            return value.astimezone(ZoneInfo(timezone_name))
+        except Exception:  # noqa: BLE001
+            return value
+    return value
 
 
 class CourseRepository:
@@ -683,18 +719,287 @@ class ReportRepository:
         self.database = database
 
     def analytics(self, *, days: int = 30) -> dict:
-        cutoff = utc_now() - timedelta(days=max(days - 1, 0))
+        window_days = max(int(days or 30), 1)
+        current_end = utc_now()
+        current_start = current_end - timedelta(days=window_days)
+        previous_start = current_start - timedelta(days=window_days)
         with self.database.session_scope() as session:
             jobs = session.scalars(
                 select(JobRun)
                 .options(selectinload(JobRun.target_groups), selectinload(JobRun.course_results))
-                .where(JobRun.created_at >= cutoff)
+                .where(JobRun.created_at >= previous_start)
                 .order_by(JobRun.created_at.desc())
             ).all()
+            recurrences = session.scalars(
+                select(AnnouncementRecurrence)
+                .options(selectinload(AnnouncementRecurrence.items))
+                .order_by(AnnouncementRecurrence.created_at.desc())
+            ).all()
 
+        now = utc_now()
+        current_jobs: list[JobRun] = []
+        previous_jobs: list[JobRun] = []
+        for job in jobs:
+            created_at = _as_utc(job.created_at) or current_end
+            if created_at >= current_start:
+                current_jobs.append(job)
+            elif created_at >= previous_start:
+                previous_jobs.append(job)
+
+        current_stats = self._collect_job_stats(current_jobs)
+        previous_stats = self._collect_job_stats(previous_jobs)
+
+        top_recurrences = defaultdict(lambda: {"name": "", "total_items": 0, "future_items": 0, "canceled_items": 0})
+        for recurrence in recurrences:
+            item_bucket = top_recurrences[recurrence.public_id]
+            item_bucket["name"] = recurrence.name
+            item_bucket["total_items"] = len(recurrence.items)
+            item_bucket["future_items"] = len(
+                [
+                    item
+                    for item in recurrence.items
+                    if (_as_utc(item.scheduled_for) or now) >= now and item.status in {"scheduled", "created"}
+                ]
+            )
+            item_bucket["canceled_items"] = len(
+                [item for item in recurrence.items if item.status == "canceled"]
+            )
+
+        active_recurrences = len([item for item in recurrences if item.is_active and not item.is_deleted])
+        recurrence_creations_current = len(
+            [item for item in recurrences if (_as_utc(item.created_at) or now) >= current_start]
+        )
+        recurrence_creations_previous = len(
+            [
+                item
+                for item in recurrences
+                if previous_start <= (_as_utc(item.created_at) or now) < current_start
+            ]
+        )
+        overview = {
+            "days": window_days,
+            "current_start": datetime_to_iso(current_start),
+            "current_end": datetime_to_iso(current_end),
+            "previous_start": datetime_to_iso(previous_start),
+            "previous_end": datetime_to_iso(current_start),
+            "total_jobs": current_stats["total_jobs"],
+            "completed_jobs": current_stats["completed_jobs"],
+            "failed_jobs": current_stats["failed_jobs"],
+            "success_rate": current_stats["success_rate"],
+            "avg_duration_seconds": current_stats["avg_duration_seconds"],
+            "total_recipients_sent": current_stats["total_recipients_sent"],
+            "total_announcements_created": current_stats["total_announcements_created"],
+            "total_engagement_jobs": current_stats["total_engagement_jobs"],
+            "active_recurrences": active_recurrences,
+            "new_recurrences_created": recurrence_creations_current,
+            "comparison": {
+                "total_jobs": self._comparison_bucket(current_stats["total_jobs"], previous_stats["total_jobs"]),
+                "completed_jobs": self._comparison_bucket(current_stats["completed_jobs"], previous_stats["completed_jobs"]),
+                "failed_jobs": self._comparison_bucket(current_stats["failed_jobs"], previous_stats["failed_jobs"]),
+                "success_rate": self._comparison_bucket(current_stats["success_rate"], previous_stats["success_rate"]),
+                "avg_duration_seconds": self._comparison_bucket(current_stats["avg_duration_seconds"], previous_stats["avg_duration_seconds"]),
+                "total_recipients_sent": self._comparison_bucket(current_stats["total_recipients_sent"], previous_stats["total_recipients_sent"]),
+                "total_announcements_created": self._comparison_bucket(current_stats["total_announcements_created"], previous_stats["total_announcements_created"]),
+                "total_engagement_jobs": self._comparison_bucket(current_stats["total_engagement_jobs"], previous_stats["total_engagement_jobs"]),
+                "new_recurrences_created": self._comparison_bucket(recurrence_creations_current, recurrence_creations_previous),
+            },
+        }
+
+        recurrence_items = [{"recurrence_id": key, **value} for key, value in sorted(top_recurrences.items(), key=lambda item: item[1]["total_items"], reverse=True)[:10]]
+        upcoming_recurrence_items = [
+            {
+                "recurrence_id": item.public_id,
+                "name": item.name,
+                "title": item.title,
+                "first_publish_at": datetime_to_iso(item.first_publish_at),
+                "occurrence_count": item.occurrence_count,
+                "future_items": len(
+                    [
+                        recurrence_item
+                        for recurrence_item in item.items
+                        if (_as_utc(recurrence_item.scheduled_for) or now) >= now and recurrence_item.status in {"scheduled", "created"}
+                    ]
+                ),
+            }
+            for item in recurrences
+            if item.is_active and not item.is_deleted
+        ][:10]
+
+        return {
+            "overview": overview,
+            "executive": self._build_executive_summary(
+                overview=overview,
+                current_stats=current_stats,
+                previous_stats=previous_stats,
+                upcoming_recurrence_items=upcoming_recurrence_items,
+            ),
+            "sections": {
+                "period_comparison": {"title": "Comparativo do periodo", "items": self._period_comparison_items(overview)},
+                "operational": {"title": "Operacional por tipo", "items": self._kind_comparison_items(current_stats["by_kind"], previous_stats["by_kind"])},
+                "daily_volume": {"title": "Volume diario do periodo atual", "items": current_stats["daily_items"]},
+                "top_courses": {"title": "Cursos mais movimentados", "items": self._course_comparison_items(current_stats["top_courses"], previous_stats["top_courses"])},
+                "top_groups": {"title": "Grupos mais usados", "items": self._group_comparison_items(current_stats["top_groups"], previous_stats["top_groups"])},
+                "active_recurrences": {"title": "Recorrencias mais carregadas", "items": recurrence_items},
+                "upcoming_recurrences": {"title": "Recorrencias ativas", "items": upcoming_recurrence_items},
+                "recent_failures": {"title": "Falhas recentes", "items": current_stats["recent_failures"][:15]},
+            },
+        }
+
+    def _build_executive_summary(
+        self,
+        *,
+        overview: dict,
+        current_stats: dict,
+        previous_stats: dict,
+        upcoming_recurrence_items: list[dict],
+    ) -> dict:
+        comparison = overview.get("comparison", {})
+        alerts: list[dict] = []
+
+        failed_jobs_cmp = comparison.get("failed_jobs", {})
+        success_rate_cmp = comparison.get("success_rate", {})
+        recipients_cmp = comparison.get("total_recipients_sent", {})
+
+        if overview.get("failed_jobs", 0) > 0:
+            level = "error" if failed_jobs_cmp.get("delta", 0) > 0 else "warning"
+            alerts.append(
+                {
+                    "level": level,
+                    "title": "Falhas operacionais no periodo",
+                    "message": (
+                        f"{overview.get('failed_jobs', 0)} lote(s) falharam na janela atual "
+                        f"contra {int(failed_jobs_cmp.get('previous', 0))} no periodo anterior."
+                    ),
+                    "action": "Revise a secao 'Falhas recentes' e os cursos com maior concentracao de erro.",
+                }
+            )
+        elif failed_jobs_cmp.get("previous", 0) > 0 and overview.get("failed_jobs", 0) == 0:
+            alerts.append(
+                {
+                    "level": "success",
+                    "title": "Recuperacao de estabilidade",
+                    "message": "Nao houve falhas no periodo atual, mesmo com falhas registradas na janela anterior.",
+                    "action": "Mantenha os mesmos grupos, cursos e estrategias que estabilizaram a operacao.",
+                }
+            )
+
+        if overview.get("success_rate", 0) < 85 or success_rate_cmp.get("delta", 0) < -5:
+            alerts.append(
+                {
+                    "level": "warning",
+                    "title": "Taxa de sucesso abaixo do ideal",
+                    "message": (
+                        f"Taxa atual de {overview.get('success_rate', 0)}% "
+                        f"contra {success_rate_cmp.get('previous', 0)}% no periodo anterior."
+                    ),
+                    "action": "Use o pre-envio e revise credenciais, turmas e anexos antes dos proximos disparos.",
+                }
+            )
+
+        if overview.get("total_jobs", 0) == 0:
+            alerts.append(
+                {
+                    "level": "info",
+                    "title": "Sem atividade operacional",
+                    "message": "Nenhum lote foi registrado na janela atual.",
+                    "action": "Ajuste o periodo ou execute um lote para iniciar a leitura comparativa.",
+                }
+            )
+        elif recipients_cmp.get("delta", 0) > 0 and overview.get("success_rate", 0) >= 90:
+            alerts.append(
+                {
+                    "level": "success",
+                    "title": "Volume cresceu com boa estabilidade",
+                    "message": (
+                        f"Foram {overview.get('total_recipients_sent', 0)} destinatarios no periodo atual, "
+                        f"com delta de {int(recipients_cmp.get('delta', 0))} frente ao anterior."
+                    ),
+                    "action": "Bom momento para ampliar grupos e rotinas recorrentes sem perder controle operacional.",
+                }
+            )
+
+        top_failure_course = next(
+            (
+                item
+                for item in self._course_comparison_items(current_stats["top_courses"], previous_stats["top_courses"])
+                if item.get("current_failure", 0) > 0
+            ),
+            None,
+        )
+        if top_failure_course:
+            alerts.append(
+                {
+                    "level": "warning",
+                    "title": "Curso com falhas concentradas",
+                    "message": (
+                        f"{top_failure_course.get('course_name') or top_failure_course.get('course_ref')} "
+                        f"registrou {top_failure_course.get('current_failure', 0)} falha(s) no periodo atual."
+                    ),
+                    "action": "Priorize este curso no proximo teste de envio ou no diagnostico de permissao/acesso.",
+                }
+            )
+
+        next_recurrence = self._next_upcoming_recurrence(upcoming_recurrence_items)
+        if next_recurrence:
+            alerts.append(
+                {
+                    "level": "info",
+                    "title": "Recorrencia proxima de disparar",
+                    "message": (
+                        f"{next_recurrence.get('name') or 'Recorrencia'} tem publicacao prevista em "
+                        f"{datetime_to_iso(next_recurrence.get('first_publish_at')) if isinstance(next_recurrence.get('first_publish_at'), datetime) else next_recurrence.get('first_publish_at') or '-'}."
+                    ),
+                    "action": "Revise o curso e a mensagem caso o calendario da disciplina tenha mudado.",
+                }
+            )
+
+        top_course = self._top_course_highlight(current_stats["top_courses"])
+        top_group = self._top_group_highlight(current_stats["top_groups"])
+        highlights = []
+        if top_course:
+            highlights.append(top_course)
+        if top_group:
+            highlights.append(top_group)
+        if top_failure_course:
+            highlights.append(
+                {
+                    "label": "Maior foco de erro",
+                    "value": top_failure_course.get("course_name") or top_failure_course.get("course_ref") or "-",
+                    "helper": (
+                        f"{top_failure_course.get('current_failure', 0)} falha(s) agora | "
+                        f"{top_failure_course.get('previous_failure', 0)} antes"
+                    ),
+                    "tone": "warning",
+                }
+            )
+        if next_recurrence:
+            highlights.append(
+                {
+                    "label": "Proxima recorrencia",
+                    "value": next_recurrence.get("name") or "-",
+                    "helper": format_datetime_short(next_recurrence.get("first_publish_at")),
+                    "tone": "info",
+                }
+            )
+        if not highlights:
+            highlights.append(
+                {
+                    "label": "Painel estavel",
+                    "value": "Sem destaques criticos",
+                    "helper": "Use os filtros do periodo para aprofundar a leitura.",
+                    "tone": "success",
+                }
+            )
+
+        return {
+            "alerts": alerts[:5],
+            "highlights": highlights[:4],
+        }
+
+    def _collect_job_stats(self, jobs: list[JobRun]) -> dict:
         durations = []
-        daily = defaultdict(lambda: {"announcement": 0, "message": 0, "completed": 0, "failed": 0})
-        by_kind = defaultdict(lambda: {"jobs": 0, "completed": 0, "failed": 0, "dry_run": 0})
+        daily = defaultdict(lambda: {"announcement": 0, "message": 0, "engagement": 0, "completed": 0, "failed": 0})
+        by_kind = defaultdict(lambda: {"jobs": 0, "completed": 0, "failed": 0, "dry_run": 0, "recipients_sent": 0, "announcements": 0})
         top_courses = defaultdict(lambda: {"course_name": "", "runs": 0, "success": 0, "failure": 0, "recipients_sent": 0, "announcements": 0})
         top_groups = defaultdict(lambda: {"group_name": "", "jobs": 0})
         recent_failures = []
@@ -703,8 +1008,10 @@ class ReportRepository:
 
         for job in jobs:
             if job.started_at and job.finished_at:
-                durations.append((job.finished_at - job.started_at).total_seconds())
-            day_key = job.created_at.date().isoformat()
+                durations.append((_as_utc(job.finished_at) - _as_utc(job.started_at)).total_seconds())
+
+            created_at = _as_utc(job.created_at) or utc_now()
+            day_key = created_at.date().isoformat()
             daily[day_key][job.kind] += 1
             if job.status == "completed":
                 daily[day_key]["completed"] += 1
@@ -721,7 +1028,8 @@ class ReportRepository:
                 kind_bucket["dry_run"] += 1
 
             for target_group in job.target_groups:
-                group_bucket = top_groups[target_group.group_public_id or target_group.group_name_snapshot]
+                group_key = target_group.group_public_id or target_group.group_name_snapshot
+                group_bucket = top_groups[group_key]
                 group_bucket["group_name"] = target_group.group_name_snapshot or target_group.group_public_id
                 group_bucket["jobs"] += 1
 
@@ -735,10 +1043,12 @@ class ReportRepository:
                 if result.status == "error":
                     course_bucket["failure"] += 1
                 course_bucket["recipients_sent"] += result.recipients_sent
+                kind_bucket["recipients_sent"] += result.recipients_sent
+                total_recipients_sent += result.recipients_sent
                 if result.announcement_id:
                     course_bucket["announcements"] += 1
+                    kind_bucket["announcements"] += 1
                     total_announcements += 1
-                total_recipients_sent += result.recipients_sent
                 if result.error_message:
                     recent_failures.append(
                         {
@@ -748,15 +1058,17 @@ class ReportRepository:
                             "course_name": result.course_name_snapshot,
                             "status": result.status,
                             "error": result.error_message,
-                            "created_at": datetime_to_iso(job.created_at),
+                            "created_at": datetime_to_iso(created_at),
                         }
                     )
 
         total_jobs = len(jobs)
         completed_jobs = len([item for item in jobs if item.status == "completed"])
         failed_jobs = len([item for item in jobs if item.status == "failed"])
-        overview = {
-            "days": days,
+        for item in by_kind.values():
+            item["success_rate"] = round((item["completed"] / item["jobs"]) * 100, 2) if item["jobs"] else 0
+
+        return {
             "total_jobs": total_jobs,
             "completed_jobs": completed_jobs,
             "failed_jobs": failed_jobs,
@@ -765,22 +1077,420 @@ class ReportRepository:
             "total_recipients_sent": total_recipients_sent,
             "total_announcements_created": total_announcements,
             "total_engagement_jobs": by_kind.get("engagement", {}).get("jobs", 0),
+            "daily_items": [{"date": key, **value} for key, value in sorted(daily.items(), key=lambda item: item[0], reverse=True)],
+            "by_kind": dict(by_kind),
+            "top_courses": dict(top_courses),
+            "top_groups": dict(top_groups),
+            "recent_failures": recent_failures,
         }
 
-        daily_items = [{"date": key, **value} for key, value in sorted(daily.items(), key=lambda item: item[0], reverse=True)]
-        by_kind_items = [{"kind": key, **value} for key, value in sorted(by_kind.items(), key=lambda item: item[0])]
-        top_course_items = [{"course_ref": key, **value} for key, value in sorted(top_courses.items(), key=lambda item: item[1]["runs"], reverse=True)[:10]]
-        top_group_items = [{"group_id": key, **value} for key, value in sorted(top_groups.items(), key=lambda item: item[1]["jobs"], reverse=True)[:10]]
-
+    @staticmethod
+    def _comparison_bucket(current_value, previous_value) -> dict:
+        current_numeric = round(float(current_value or 0), 2)
+        previous_numeric = round(float(previous_value or 0), 2)
+        delta = round(current_numeric - previous_numeric, 2)
+        if previous_numeric == 0:
+            delta_percent = 0 if current_numeric == 0 else None
+        else:
+            delta_percent = round((delta / previous_numeric) * 100, 2)
+        direction = "up" if delta > 0 else "down" if delta < 0 else "flat"
         return {
-            "overview": overview,
-            "sections": {
-                "operational": {"title": "Operacional por periodo", "items": by_kind_items},
-                "daily_volume": {"title": "Volume diario", "items": daily_items},
-                "top_courses": {"title": "Cursos mais movimentados", "items": top_course_items},
-                "top_groups": {"title": "Grupos mais usados", "items": top_group_items},
-                "recent_failures": {"title": "Falhas recentes", "items": recent_failures[:15]},
-            },
+            "current": current_numeric,
+            "previous": previous_numeric,
+            "delta": delta,
+            "delta_percent": delta_percent,
+            "direction": direction,
+            "baseline_empty": previous_numeric == 0,
+        }
+
+    def _period_comparison_items(self, overview: dict) -> list[dict]:
+        labels = {
+            "total_jobs": "Lotes",
+            "completed_jobs": "Concluidos",
+            "failed_jobs": "Falhas",
+            "success_rate": "Taxa de sucesso",
+            "avg_duration_seconds": "Duracao media (s)",
+            "total_recipients_sent": "Mensagens enviadas",
+            "total_announcements_created": "Comunicados criados",
+            "total_engagement_jobs": "Envios para inativos",
+            "new_recurrences_created": "Novas recorrencias",
+        }
+        return [
+            {"metric": labels[key], **value}
+            for key, value in overview.get("comparison", {}).items()
+            if key in labels
+        ]
+
+    def _kind_comparison_items(self, current_map: dict, previous_map: dict) -> list[dict]:
+        items = []
+        for key in sorted(set(current_map) | set(previous_map)):
+            current_item = current_map.get(key, {})
+            previous_item = previous_map.get(key, {})
+            items.append(
+                {
+                    "kind": key,
+                    "current_jobs": current_item.get("jobs", 0),
+                    "previous_jobs": previous_item.get("jobs", 0),
+                    "delta_jobs": current_item.get("jobs", 0) - previous_item.get("jobs", 0),
+                    "current_completed": current_item.get("completed", 0),
+                    "previous_completed": previous_item.get("completed", 0),
+                    "current_failed": current_item.get("failed", 0),
+                    "previous_failed": previous_item.get("failed", 0),
+                    "current_dry_run": current_item.get("dry_run", 0),
+                    "previous_dry_run": previous_item.get("dry_run", 0),
+                    "current_success_rate": current_item.get("success_rate", 0),
+                    "previous_success_rate": previous_item.get("success_rate", 0),
+                    "current_recipients_sent": current_item.get("recipients_sent", 0),
+                    "previous_recipients_sent": previous_item.get("recipients_sent", 0),
+                    "current_announcements": current_item.get("announcements", 0),
+                    "previous_announcements": previous_item.get("announcements", 0),
+                }
+            )
+        return items
+
+    def _course_comparison_items(self, current_map: dict, previous_map: dict) -> list[dict]:
+        items = []
+        for key in set(current_map) | set(previous_map):
+            current_item = current_map.get(key, {})
+            previous_item = previous_map.get(key, {})
+            items.append(
+                {
+                    "course_ref": key,
+                    "course_name": current_item.get("course_name") or previous_item.get("course_name") or key,
+                    "current_runs": current_item.get("runs", 0),
+                    "previous_runs": previous_item.get("runs", 0),
+                    "delta_runs": current_item.get("runs", 0) - previous_item.get("runs", 0),
+                    "current_success": current_item.get("success", 0),
+                    "previous_success": previous_item.get("success", 0),
+                    "current_failure": current_item.get("failure", 0),
+                    "previous_failure": previous_item.get("failure", 0),
+                    "current_recipients_sent": current_item.get("recipients_sent", 0),
+                    "previous_recipients_sent": previous_item.get("recipients_sent", 0),
+                    "delta_recipients_sent": current_item.get("recipients_sent", 0) - previous_item.get("recipients_sent", 0),
+                    "current_announcements": current_item.get("announcements", 0),
+                    "previous_announcements": previous_item.get("announcements", 0),
+                }
+            )
+        return sorted(
+            items,
+            key=lambda item: (item["current_runs"], item["previous_runs"], item["current_recipients_sent"]),
+            reverse=True,
+        )[:10]
+
+    def _group_comparison_items(self, current_map: dict, previous_map: dict) -> list[dict]:
+        items = []
+        for key in set(current_map) | set(previous_map):
+            current_item = current_map.get(key, {})
+            previous_item = previous_map.get(key, {})
+            items.append(
+                {
+                    "group_id": key,
+                    "group_name": current_item.get("group_name") or previous_item.get("group_name") or key,
+                    "current_jobs": current_item.get("jobs", 0),
+                    "previous_jobs": previous_item.get("jobs", 0),
+                    "delta_jobs": current_item.get("jobs", 0) - previous_item.get("jobs", 0),
+                }
+            )
+        return sorted(items, key=lambda item: (item["current_jobs"], item["previous_jobs"]), reverse=True)[:10]
+
+    @staticmethod
+    def _top_course_highlight(current_map: dict) -> dict | None:
+        if not current_map:
+            return None
+        key, item = max(
+            current_map.items(),
+            key=lambda pair: (pair[1].get("runs", 0), pair[1].get("recipients_sent", 0)),
+        )
+        return {
+            "label": "Curso mais acionado",
+            "value": item.get("course_name") or key,
+            "helper": f"{item.get('runs', 0)} execucao(oes) | {item.get('recipients_sent', 0)} mensagens",
+            "tone": "info",
+        }
+
+    @staticmethod
+    def _top_group_highlight(current_map: dict) -> dict | None:
+        if not current_map:
+            return None
+        key, item = max(current_map.items(), key=lambda pair: pair[1].get("jobs", 0))
+        return {
+            "label": "Grupo mais usado",
+            "value": item.get("group_name") or key,
+            "helper": f"{item.get('jobs', 0)} lote(s) no periodo",
+            "tone": "info",
+        }
+
+    @staticmethod
+    def _next_upcoming_recurrence(upcoming_items: list[dict]) -> dict | None:
+        sorted_items = sorted(
+            [item for item in upcoming_items if item.get("first_publish_at")],
+            key=lambda item: item.get("first_publish_at") or "",
+        )
+        return sorted_items[0] if sorted_items else None
+
+
+def format_datetime_short(value) -> str:
+    if not value:
+        return "-"
+    if isinstance(value, datetime):
+        resolved = _as_utc(value)
+        return resolved.strftime("%d/%m %H:%M") if resolved else "-"
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return str(value)
+    resolved = _as_utc(parsed)
+    return resolved.strftime("%d/%m %H:%M") if resolved else "-"
+
+
+class AnnouncementRecurrenceRepository:
+    def __init__(self, database):
+        self.database = database
+
+    def list_recurrences(self, *, active_only: bool | None = True) -> list[dict]:
+        with self.database.session_scope() as session:
+            stmt = (
+                select(AnnouncementRecurrence)
+                .options(selectinload(AnnouncementRecurrence.items))
+                .order_by(AnnouncementRecurrence.created_at.desc())
+            )
+            if active_only is True:
+                stmt = stmt.where(AnnouncementRecurrence.is_active.is_(True), AnnouncementRecurrence.is_deleted.is_(False))
+            elif active_only is False:
+                stmt = stmt.where(AnnouncementRecurrence.is_active.is_(False))
+            rows = session.scalars(stmt).all()
+            return [self._serialize_recurrence(item) for item in rows]
+
+    def get_recurrence(self, public_id: str, *, active_only: bool | None = None) -> dict | None:
+        normalized = str(public_id or "").strip()
+        if not normalized:
+            return None
+        with self.database.session_scope() as session:
+            stmt = (
+                select(AnnouncementRecurrence)
+                .options(selectinload(AnnouncementRecurrence.items))
+                .where(AnnouncementRecurrence.public_id == normalized)
+            )
+            if active_only is True:
+                stmt = stmt.where(AnnouncementRecurrence.is_active.is_(True), AnnouncementRecurrence.is_deleted.is_(False))
+            row = session.scalar(stmt)
+            return self._serialize_recurrence(row) if row else None
+
+    def create_recurrence(self, payload: dict, items: list[dict]) -> dict:
+        now = utc_now()
+        with self.database.session_scope() as session:
+            row = AnnouncementRecurrence(
+                public_id=uuid4().hex[:12],
+                name=payload["name"],
+                title=payload["title"],
+                message_html=payload["message_html"],
+                lock_comment=bool(payload.get("lock_comment")),
+                target_mode=payload.get("target_mode") or "groups",
+                target_config_json=payload.get("target_config_json") or {},
+                recurrence_type=payload["recurrence_type"],
+                interval_value=int(payload["interval_value"]),
+                occurrence_count=int(payload["occurrence_count"]),
+                first_publish_at=payload["first_publish_at"],
+                client_timezone=payload.get("client_timezone") or "UTC",
+                base_url_snapshot=payload.get("base_url_snapshot") or "",
+                canvas_user_id=payload.get("canvas_user_id"),
+                canvas_user_name=payload.get("canvas_user_name") or "",
+                last_error=payload.get("last_error"),
+                created_at=now,
+                updated_at=now,
+                activated_at=now,
+            )
+            session.add(row)
+            session.flush()
+
+            for item in items:
+                session.add(
+                    AnnouncementRecurrenceItem(
+                        recurrence_id=row.id,
+                        occurrence_index=int(item["occurrence_index"]),
+                        course_ref_snapshot=item.get("course_ref_snapshot") or "",
+                        course_id_snapshot=item.get("course_id_snapshot"),
+                        course_name_snapshot=item.get("course_name_snapshot") or "",
+                        scheduled_for=item["scheduled_for"],
+                        canvas_topic_id=item.get("canvas_topic_id"),
+                        canvas_topic_url=item.get("canvas_topic_url"),
+                        status=item.get("status") or "scheduled",
+                        error_message=item.get("error_message"),
+                        deleted_on_canvas=bool(item.get("deleted_on_canvas")),
+                        canceled_at=item.get("canceled_at"),
+                        created_at=now,
+                        updated_at=now,
+                    )
+                )
+
+            session.flush()
+            session.refresh(row)
+            return self._serialize_recurrence(row)
+
+    def cancel_recurrence(self, public_id: str, *, cancel_reason: str, item_updates: list[dict]) -> dict:
+        normalized = str(public_id or "").strip()
+        with self.database.session_scope() as session:
+            row = session.scalar(
+                select(AnnouncementRecurrence)
+                .options(selectinload(AnnouncementRecurrence.items))
+                .where(AnnouncementRecurrence.public_id == normalized)
+            )
+            if row is None:
+                raise ValueError("Recorrencia de avisos nao encontrada.")
+
+            now = utc_now()
+            row.is_active = False
+            row.is_deleted = False
+            row.deactivated_at = now
+            row.canceled_at = now
+            row.cancel_reason = cancel_reason or ""
+            row.updated_at = now
+
+            updates_by_id = {int(item["item_id"]): item for item in item_updates if item.get("item_id") is not None}
+            for item in row.items:
+                update_data = updates_by_id.get(item.id)
+                if not update_data:
+                    continue
+                item.status = update_data.get("status") or item.status
+                item.error_message = update_data.get("error_message")
+                item.deleted_on_canvas = bool(update_data.get("deleted_on_canvas"))
+                item.canceled_at = update_data.get("canceled_at") or now
+                item.updated_at = now
+
+            session.flush()
+            session.refresh(row)
+            return self._serialize_recurrence(row)
+
+    def update_recurrence(self, public_id: str, *, payload: dict, replace_item_ids: list[int], new_items: list[dict]) -> dict:
+        normalized = str(public_id or "").strip()
+        with self.database.session_scope() as session:
+            row = session.scalar(
+                select(AnnouncementRecurrence)
+                .options(selectinload(AnnouncementRecurrence.items))
+                .where(AnnouncementRecurrence.public_id == normalized)
+            )
+            if row is None:
+                raise ValueError("Recorrencia de avisos nao encontrada.")
+
+            now = utc_now()
+            replace_ids = {int(item_id) for item_id in replace_item_ids}
+            for item in list(row.items):
+                if item.id in replace_ids:
+                    session.delete(item)
+            session.flush()
+
+            row.name = payload["name"]
+            row.title = payload["title"]
+            row.message_html = payload["message_html"]
+            row.lock_comment = bool(payload.get("lock_comment"))
+            row.target_mode = payload.get("target_mode") or "groups"
+            row.target_config_json = payload.get("target_config_json") or {}
+            row.recurrence_type = payload["recurrence_type"]
+            row.interval_value = int(payload["interval_value"])
+            row.occurrence_count = int(payload["occurrence_count"])
+            row.first_publish_at = payload["first_publish_at"]
+            row.client_timezone = payload.get("client_timezone") or "UTC"
+            row.base_url_snapshot = payload.get("base_url_snapshot") or ""
+            row.canvas_user_id = payload.get("canvas_user_id")
+            row.canvas_user_name = payload.get("canvas_user_name") or ""
+            row.last_error = payload.get("last_error")
+            row.is_active = True
+            row.is_deleted = False
+            row.deactivated_at = None
+            row.deleted_at = None
+            row.canceled_at = None
+            row.cancel_reason = None
+            row.activated_at = row.activated_at or now
+            row.updated_at = now
+
+            for item in new_items:
+                session.add(
+                    AnnouncementRecurrenceItem(
+                        recurrence_id=row.id,
+                        occurrence_index=int(item["occurrence_index"]),
+                        course_ref_snapshot=item.get("course_ref_snapshot") or "",
+                        course_id_snapshot=item.get("course_id_snapshot"),
+                        course_name_snapshot=item.get("course_name_snapshot") or "",
+                        scheduled_for=item["scheduled_for"],
+                        canvas_topic_id=item.get("canvas_topic_id"),
+                        canvas_topic_url=item.get("canvas_topic_url"),
+                        status=item.get("status") or "scheduled",
+                        error_message=item.get("error_message"),
+                        deleted_on_canvas=bool(item.get("deleted_on_canvas")),
+                        canceled_at=item.get("canceled_at"),
+                        created_at=now,
+                        updated_at=now,
+                    )
+                )
+
+            session.flush()
+            session.expire(row, ["items"])
+            session.refresh(row)
+            return self._serialize_recurrence(row)
+
+    @staticmethod
+    def _serialize_item(row: AnnouncementRecurrenceItem, timezone_name: str | None = None) -> dict:
+        return {
+            "item_id": row.id,
+            "occurrence_index": row.occurrence_index,
+            "course_ref": row.course_ref_snapshot,
+            "course_id": row.course_id_snapshot,
+            "course_name": row.course_name_snapshot,
+            "scheduled_for": datetime_to_iso(_with_timezone(row.scheduled_for, timezone_name)),
+            "canvas_topic_id": row.canvas_topic_id,
+            "canvas_topic_url": row.canvas_topic_url,
+            "status": row.status,
+            "error_message": row.error_message,
+            "deleted_on_canvas": row.deleted_on_canvas,
+            "canceled_at": datetime_to_iso(row.canceled_at),
+            "created_at": datetime_to_iso(row.created_at),
+            "updated_at": datetime_to_iso(row.updated_at),
+        }
+
+    @classmethod
+    def _serialize_recurrence(cls, row: AnnouncementRecurrence | None) -> dict | None:
+        if row is None:
+            return None
+        now = utc_now()
+        timezone_name = row.client_timezone or "UTC"
+        items = [cls._serialize_item(item, timezone_name) for item in sorted(row.items, key=lambda entry: (entry.scheduled_for, entry.course_ref_snapshot, entry.occurrence_index))]
+        future_items = [
+            item
+            for item in row.items
+            if (_as_utc(item.scheduled_for) or now) >= now and item.status in {"scheduled", "created"}
+        ]
+        return {
+            "id": row.public_id,
+            "name": row.name,
+            "title": row.title,
+            "message_html": row.message_html,
+            "lock_comment": row.lock_comment,
+            "target_mode": row.target_mode,
+            "target_config_json": row.target_config_json or {},
+            "recurrence_type": row.recurrence_type,
+            "interval_value": row.interval_value,
+            "occurrence_count": row.occurrence_count,
+            "first_publish_at": datetime_to_iso(_with_timezone(row.first_publish_at, timezone_name)),
+            "client_timezone": row.client_timezone,
+            "base_url_snapshot": row.base_url_snapshot,
+            "canvas_user_id": row.canvas_user_id,
+            "canvas_user_name": row.canvas_user_name,
+            "cancel_reason": row.cancel_reason,
+            "canceled_at": datetime_to_iso(row.canceled_at),
+            "last_error": row.last_error,
+            "is_active": row.is_active,
+            "is_deleted": row.is_deleted,
+            "created_at": datetime_to_iso(row.created_at),
+            "updated_at": datetime_to_iso(row.updated_at),
+            "activated_at": datetime_to_iso(row.activated_at),
+            "deactivated_at": datetime_to_iso(row.deactivated_at),
+            "deleted_at": datetime_to_iso(row.deleted_at),
+            "total_items": len(items),
+            "future_items": len(future_items),
+            "canceled_items": len([item for item in row.items if item.status == "canceled"]),
+            "error_items": len([item for item in row.items if item.status == "error"]),
+            "next_publish_at": datetime_to_iso(_with_timezone(min((item.scheduled_for for item in future_items), default=None), timezone_name)),
+            "items": items,
         }
 
 
@@ -790,7 +1500,15 @@ class DatabaseAdminRepository:
 
     def wipe_all_data(self) -> dict:
         with self.database.session_scope() as session:
+            inspector = inspect(session.bind)
+            legacy_tables = {
+                table_name
+                for table_name in ("campaign_runs", "campaign_schedules", "campaign_templates")
+                if inspector.has_table(table_name)
+            }
             counts = {
+                "announcement_recurrence_items": session.query(AnnouncementRecurrenceItem).count(),
+                "announcement_recurrences": session.query(AnnouncementRecurrence).count(),
                 "job_logs": session.query(JobLog).count(),
                 "job_course_results": session.query(JobCourseResult).count(),
                 "job_target_courses": session.query(JobTargetCourse).count(),
@@ -800,6 +1518,12 @@ class DatabaseAdminRepository:
                 "course_groups": session.query(CourseGroup).count(),
                 "courses": session.query(Course).count(),
             }
+            for table_name in sorted(legacy_tables):
+                counts[table_name] = session.execute(text(f"SELECT COUNT(*) FROM {table_name}")).scalar_one()
+            session.execute(delete(AnnouncementRecurrenceItem))
+            session.execute(delete(AnnouncementRecurrence))
+            for table_name in sorted(legacy_tables):
+                session.execute(text(f"DELETE FROM {table_name}"))
             session.execute(delete(JobLog))
             session.execute(delete(JobCourseResult))
             session.execute(delete(JobTargetCourse))

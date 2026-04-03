@@ -185,3 +185,58 @@ class JobCourseResult(Base):
 
     job_run: Mapped["JobRun"] = relationship(back_populates="course_results")
     course: Mapped["Course"] = relationship(back_populates="job_results")
+
+
+class AnnouncementRecurrence(Base, TimestampMixin, SoftDeleteMixin):
+    __tablename__ = "announcement_recurrences"
+    __table_args__ = (
+        Index("ix_announcement_recurrences_next_active", "first_publish_at", "is_active"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    public_id: Mapped[str] = mapped_column(String(12), nullable=False, unique=True, index=True)
+    name: Mapped[str] = mapped_column(String(180), nullable=False, index=True)
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    message_html: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    lock_comment: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    target_mode: Mapped[str] = mapped_column(String(32), default="groups", nullable=False)
+    target_config_json: Mapped[dict | None] = mapped_column(JSON)
+    recurrence_type: Mapped[str] = mapped_column(String(32), default="weekly", nullable=False)
+    interval_value: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    occurrence_count: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    first_publish_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    client_timezone: Mapped[str] = mapped_column(String(80), default="UTC", nullable=False)
+    base_url_snapshot: Mapped[str] = mapped_column(String(255), default="", nullable=False)
+    canvas_user_id: Mapped[int | None] = mapped_column(Integer, index=True)
+    canvas_user_name: Mapped[str] = mapped_column(String(255), default="", nullable=False)
+    cancel_reason: Mapped[str | None] = mapped_column(Text)
+    canceled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_error: Mapped[str | None] = mapped_column(Text)
+
+    items: Mapped[list["AnnouncementRecurrenceItem"]] = relationship(back_populates="recurrence")
+
+
+class AnnouncementRecurrenceItem(Base):
+    __tablename__ = "announcement_recurrence_items"
+    __table_args__ = (
+        Index("ix_announcement_recurrence_items_schedule", "scheduled_for", "status"),
+        UniqueConstraint("recurrence_id", "course_ref_snapshot", "occurrence_index", name="uq_recurrence_course_occurrence"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    recurrence_id: Mapped[int] = mapped_column(ForeignKey("announcement_recurrences.id"), nullable=False, index=True)
+    occurrence_index: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    course_ref_snapshot: Mapped[str] = mapped_column(String(64), default="", nullable=False)
+    course_id_snapshot: Mapped[int | None] = mapped_column(Integer, index=True)
+    course_name_snapshot: Mapped[str] = mapped_column(String(255), default="", nullable=False)
+    scheduled_for: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    canvas_topic_id: Mapped[int | None] = mapped_column(Integer, index=True)
+    canvas_topic_url: Mapped[str | None] = mapped_column(String(500))
+    status: Mapped[str] = mapped_column(String(32), default="scheduled", nullable=False, index=True)
+    error_message: Mapped[str | None] = mapped_column(Text)
+    deleted_on_canvas: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    canceled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    recurrence: Mapped["AnnouncementRecurrence"] = relationship(back_populates="items")

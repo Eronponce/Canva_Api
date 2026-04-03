@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import json
+
 from flask import Blueprint, current_app, jsonify, render_template, request, send_from_directory
 
 from src.services.canvas_client import CanvasApiError
+from src.utils.attachment_utils import save_uploaded_file
 
 
 web = Blueprint("web", __name__)
@@ -10,6 +13,27 @@ web = Blueprint("web", __name__)
 
 def services():
     return current_app.extensions["services"]
+
+
+def _request_payload() -> dict:
+    if request.is_json:
+        return request.get_json(silent=True) or {}
+
+    raw_payload = request.form.get("payload_json", "")
+    if raw_payload:
+        try:
+            return json.loads(raw_payload)
+        except json.JSONDecodeError as exc:
+            raise ValueError("Nao foi possivel interpretar os dados enviados pelo formulario.") from exc
+    return {}
+
+
+def _request_attachment() -> dict | None:
+    uploaded_file = request.files.get("attachment")
+    if not uploaded_file or not uploaded_file.filename:
+        return None
+    app_config = current_app.config["APP_CONFIG"]
+    return save_uploaded_file(uploaded_file, app_config.uploads_dir)
 
 
 def _with_resolved_courses(payload: dict, empty_message: str) -> tuple[dict, list[str]]:
@@ -56,6 +80,7 @@ def get_config():
             "settings": app_config.public_settings(),
             "groups": course_service.list_groups()["items"],
             "registered_courses": course_service.list_registered_courses()["items"],
+            "announcement_recurrences": services()["announcement_recurrence_service"].list_recurrences(include_inactive=True)["items"],
         }
     )
 
@@ -179,7 +204,16 @@ def wipe_database():
 
 @web.post("/api/announcements/jobs")
 def create_announcement_job():
-    raw_payload = request.get_json(silent=True) or {}
+    raw_payload = _request_payload()
+    attachment = _request_attachment()
+    if attachment:
+        raw_payload = {
+            **raw_payload,
+            "attachment_temp_path": attachment["temp_path"],
+            "attachment_name": attachment["original_name"],
+            "attachment_content_type": attachment["content_type"],
+            "attachment_size": attachment["size"],
+        }
     payload, course_refs = _with_resolved_courses(
         raw_payload,
         "Selecione ao menos um grupo ou curso para publicar o comunicado.",
@@ -208,9 +242,37 @@ def create_announcement_job():
     return jsonify({"job": job}), 202
 
 
+@web.post("/api/announcements/preflight")
+def preview_announcement_job():
+    raw_payload = _request_payload()
+    uploaded_file = request.files.get("attachment")
+    if uploaded_file and uploaded_file.filename:
+        raw_payload = {
+            **raw_payload,
+            "attachment_name": uploaded_file.filename,
+            "attachment_content_type": uploaded_file.mimetype or "application/octet-stream",
+            "attachment_size": getattr(uploaded_file, "content_length", None) or 0,
+        }
+    payload, _course_refs = _with_resolved_courses(
+        raw_payload,
+        "Selecione ao menos um grupo ou curso para revisar o comunicado.",
+    )
+    result = services()["announcement_service"].preview_job(payload)
+    return jsonify(result)
+
+
 @web.post("/api/messages/jobs")
 def create_message_job():
-    raw_payload = request.get_json(silent=True) or {}
+    raw_payload = _request_payload()
+    attachment = _request_attachment()
+    if attachment:
+        raw_payload = {
+            **raw_payload,
+            "attachment_temp_path": attachment["temp_path"],
+            "attachment_name": attachment["original_name"],
+            "attachment_content_type": attachment["content_type"],
+            "attachment_size": attachment["size"],
+        }
     payload, course_refs = _with_resolved_courses(
         raw_payload,
         "Selecione ao menos um grupo ou curso para enviar as mensagens.",
@@ -295,6 +357,44 @@ def create_engagement_job():
         payload,
     )
     return jsonify({"job": job}), 202
+
+
+@web.post("/api/announcement-recurrences/preview")
+def preview_announcement_recurrence():
+    raw_payload = request.get_json(silent=True) or {}
+    result = services()["announcement_recurrence_service"].preview(raw_payload)
+    return jsonify(result)
+
+
+@web.get("/api/announcement-recurrences")
+def list_announcement_recurrences():
+    return jsonify(services()["announcement_recurrence_service"].list_recurrences(include_inactive=_include_inactive()))
+
+
+@web.get("/api/announcement-recurrences/<recurrence_id>")
+def get_announcement_recurrence(recurrence_id: str):
+    return jsonify(services()["announcement_recurrence_service"].get_recurrence(recurrence_id, include_inactive=_include_inactive()))
+
+
+@web.post("/api/announcement-recurrences")
+def create_announcement_recurrence():
+    raw_payload = request.get_json(silent=True) or {}
+    result = services()["announcement_recurrence_service"].create_recurrence(raw_payload)
+    return jsonify(result), 201
+
+
+@web.put("/api/announcement-recurrences/<recurrence_id>")
+def update_announcement_recurrence(recurrence_id: str):
+    raw_payload = request.get_json(silent=True) or {}
+    result = services()["announcement_recurrence_service"].update_recurrence(recurrence_id, raw_payload)
+    return jsonify(result)
+
+
+@web.post("/api/announcement-recurrences/<recurrence_id>/cancel")
+def cancel_announcement_recurrence(recurrence_id: str):
+    raw_payload = request.get_json(silent=True) or {}
+    result = services()["announcement_recurrence_service"].cancel_recurrence(recurrence_id, raw_payload)
+    return jsonify(result)
 
 
 @web.get("/api/jobs/<job_id>")

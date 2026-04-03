@@ -8,6 +8,11 @@ venv/
 build/
 dist/
 .pytest_cache/
+node_modules/
+playwright-report/
+test-results/
+ui-audit/runtime-data/
+ui-audit/report/
 logs/*.log
 logs/*.pid
 logs/server.stdout.log
