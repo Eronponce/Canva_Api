@@ -46,6 +46,7 @@ const state = {
     courseRefs: [],
     selectAllGroups: false,
     preview: null,
+    editingId: null,
   },
   engagement: {
     mode: "groups",
@@ -241,6 +242,7 @@ function bindEvents() {
   $("#recurrenceOccurrences").addEventListener("input", persistUiState);
   $("#recurrenceLockComment").addEventListener("change", persistUiState);
   $("#previewRecurrenceBtn").addEventListener("click", previewRecurrence);
+  $("#clearRecurrenceEditBtn").addEventListener("click", clearRecurrenceEditMode);
   $("#recurrenceForm").addEventListener("submit", submitRecurrence);
 
   $("#engagementCriteriaMode").addEventListener("change", () => {
@@ -455,7 +457,7 @@ function restoreUiState() {
     }
     state.announcement = { ...state.announcement, ...(saved.announcement || {}) };
     state.message = { ...state.message, ...(saved.message || {}) };
-    state.recurrence = { ...state.recurrence, ...(saved.recurrence || {}), preview: null };
+    state.recurrence = { ...state.recurrence, ...(saved.recurrence || {}), preview: null, editingId: null };
     state.engagement = { ...state.engagement, ...(saved.engagement || {}), preview: null };
     if (!["groups", "courses"].includes(state.message.mode)) {
       state.message.mode = "groups";
@@ -780,6 +782,7 @@ function renderAll() {
   renderCatalogCourseSummary();
   renderRecurrencePreview(state.recurrence.preview);
   renderRecurrences();
+  renderRecurrenceEditorState();
   renderEngagementPreview(state.engagement.preview);
   renderReports();
   renderSettingsInfo(state.config || {});
@@ -1106,7 +1109,8 @@ function renderRecurrences() {
           <div class="compact-meta">${escapeHtml(item.title || "-")} | ${escapeHtml(item.recurrence_type || "-")} a cada ${escapeHtml(String(item.interval_value || 1))}</div>
         </div>
         <div class="group-card-actions">
-          <button class="mini-btn" type="button" data-recurrence-action="reuse" data-recurrence-id="${escapeHtml(item.id)}">Usar como base</button>
+          <button class="mini-btn" type="button" data-recurrence-action="edit" data-recurrence-id="${escapeHtml(item.id)}">Editar</button>
+          <button class="mini-btn" type="button" data-recurrence-action="reuse" data-recurrence-id="${escapeHtml(item.id)}">Duplicar base</button>
           <button class="mini-btn danger" type="button" data-recurrence-action="cancel" data-recurrence-id="${escapeHtml(item.id)}">${item.is_active ? "Cancelar futuros" : "Tentar cancelar"}</button>
         </div>
       </div>
@@ -1125,8 +1129,9 @@ function renderRecurrences() {
   `).join("");
 }
 
-function applyRecurrenceToForm(item) {
+function applyRecurrenceToForm(item, mode = "reuse") {
   openTab("recurrence");
+  state.recurrence.editingId = mode === "edit" ? item.id : null;
   $("#recurrenceName").value = item.name || "";
   $("#recurrenceTitle").value = item.title || "";
   $("#recurrenceMessage").value = item.message_html || "";
@@ -1142,8 +1147,44 @@ function applyRecurrenceToForm(item) {
   state.recurrence.preview = null;
   renderTargetControls("recurrence");
   renderRecurrencePreview(null);
+  renderRecurrenceEditorState();
   persistUiState();
-  showNotice(`Recorrencia "${item.name || item.title}" carregada no formulario.`, "success");
+  showNotice(
+    mode === "edit"
+      ? `Edicao da recorrencia "${item.name || item.title}" carregada no formulario.`
+      : `Recorrencia "${item.name || item.title}" carregada como base no formulario.`,
+    "success",
+  );
+}
+
+function clearRecurrenceEditMode(showFeedback = true) {
+  state.recurrence.editingId = null;
+  renderRecurrenceEditorState();
+  if (showFeedback) {
+    showNotice("Formulario de recorrencia voltou ao modo de criacao.", "info");
+  }
+}
+
+function renderRecurrenceEditorState() {
+  const current = state.recurrences.find((item) => item.id === state.recurrence.editingId) || null;
+  if (!current && state.recurrence.editingId) {
+    state.recurrence.editingId = null;
+  }
+  const notice = $("#recurrenceEditState");
+  const clearButton = $("#clearRecurrenceEditBtn");
+  const submitButton = $("#submitRecurrenceBtn");
+  if (!notice || !clearButton || !submitButton) return;
+  if (!current) {
+    notice.classList.add("hidden");
+    notice.textContent = "";
+    clearButton.classList.add("hidden");
+    submitButton.textContent = "Criar recorrencia";
+    return;
+  }
+  notice.classList.remove("hidden");
+  notice.textContent = `Editando ${current.name || current.title || "recorrencia"}: os avisos futuros serao substituidos no Canvas.`;
+  clearButton.classList.remove("hidden");
+  submitButton.textContent = "Salvar ajustes";
 }
 
 async function handleGroupClick(event) {
@@ -1472,6 +1513,10 @@ async function handleRecurrenceAction(action, recurrenceId) {
   const recurrence = state.recurrences.find((item) => item.id === recurrenceId);
   if (!recurrence) {
     showNotice("Recorrencia nao encontrada.", "error");
+    return;
+  }
+  if (action === "edit") {
+    applyRecurrenceToForm(recurrence, "edit");
     return;
   }
   if (action === "reuse") {
@@ -2620,19 +2665,29 @@ async function executeEngagementJob() {
 async function submitRecurrence(event) {
   event.preventDefault();
   const button = $("#recurrenceForm button[type='submit']");
-  setBusy(button, true, "Criando...");
+  setBusy(button, true, state.recurrence.editingId ? "Salvando..." : "Criando...");
   hideNotice();
   clearFieldValidation();
   try {
     if (!validateRecurrenceForm()) return;
-    const response = await apiFetch("/api/announcement-recurrences", {
-      method: "POST",
-      body: buildRecurrenceRequestBody(),
-    });
+    const isEditing = Boolean(state.recurrence.editingId);
+    const response = await apiFetch(
+      isEditing ? `/api/announcement-recurrences/${state.recurrence.editingId}` : "/api/announcement-recurrences",
+      {
+        method: isEditing ? "PUT" : "POST",
+        body: buildRecurrenceRequestBody(),
+      },
+    );
     state.recurrence.preview = null;
+    state.recurrence.editingId = null;
     await loadConfig();
     renderAll();
-    showNotice(`Recorrencia criada com ${response.created_count || 0} aviso(s) agendado(s) no Canvas.`, response.failure_count ? "info" : "success");
+    showNotice(
+      isEditing
+        ? `Recorrencia atualizada. ${response.created_count || 0} aviso(s) futuro(s) recriado(s) no Canvas.`
+        : `Recorrencia criada com ${response.created_count || 0} aviso(s) agendado(s) no Canvas.`,
+      response.failure_count ? "info" : "success",
+    );
   } catch (error) {
     showNotice(error.message, "error");
   } finally {

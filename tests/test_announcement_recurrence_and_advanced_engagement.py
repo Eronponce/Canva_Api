@@ -223,6 +223,58 @@ def test_announcement_recurrence_cancel_removes_future_topics(client, app, monke
     assert items[0]["canceled_items"] == 2
 
 
+def test_announcement_recurrence_update_replaces_future_topics(client, app, monkeypatch):
+    services = app.extensions["services"]
+    fake_client = FakeCanvasClient()
+    monkeypatch.setattr(services["connection_service"], "build_client", lambda payload: fake_client)
+
+    created = client.post(
+        "/api/announcement-recurrences",
+        json={
+            **_connection_payload(),
+            "target_mode": "courses",
+            "course_refs": ["101"],
+            "name": "Quinta 19h",
+            "title": "Encontro semanal",
+            "message_html": "<p>Lembrete</p>",
+            "recurrence_type": "weekly",
+            "interval_value": 1,
+            "first_publish_at_local": "2030-05-01T19:00",
+            "occurrence_count": 2,
+            "lock_comment": True,
+        },
+    ).get_json()["item"]
+
+    update_response = client.put(
+        f"/api/announcement-recurrences/{created['id']}",
+        json={
+            **_connection_payload(),
+            "target_mode": "courses",
+            "course_refs": ["101"],
+            "name": "Quinta 20h",
+            "title": "Encontro atualizado",
+            "message_html": "<p>Novo horario</p>",
+            "recurrence_type": "daily",
+            "interval_value": 1,
+            "first_publish_at_local": "2030-05-10T20:00",
+            "occurrence_count": 1,
+            "lock_comment": False,
+        },
+    )
+    assert update_response.status_code == 200
+    payload = update_response.get_json()
+    assert payload["replaced_count"] == 2
+    assert payload["created_count"] == 1
+    assert payload["failure_count"] == 0
+    assert payload["item"]["id"] == created["id"]
+    assert payload["item"]["name"] == "Quinta 20h"
+    assert payload["item"]["title"] == "Encontro atualizado"
+    assert payload["item"]["future_items"] == 1
+    assert len(fake_client.deleted_topics) == 2
+    assert len(fake_client.announcements_created) == 3
+    assert fake_client.announcements_created[-1]["title"] == "Encontro atualizado"
+
+
 def test_advanced_engagement_filters_use_enrollments(client, app, monkeypatch):
     services = app.extensions["services"]
     fake_client = FakeCanvasClient()

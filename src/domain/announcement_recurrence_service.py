@@ -47,59 +47,8 @@ class AnnouncementRecurrenceService:
 
     def create_recurrence(self, payload: dict) -> dict:
         prepared = self._prepare(payload)
-        client = prepared["client"]
         user = prepared["user"]
-        items = []
-        failure_count = 0
-
-        for course in prepared["courses"]:
-            for occurrence_index, publish_at in enumerate(prepared["schedule"], start=1):
-                try:
-                    rendered_title = self._render_template(
-                        prepared["title"],
-                        course_name=course["course_name"],
-                        course_ref=course["course_ref"],
-                        course_code=course.get("course_code"),
-                    )
-                    rendered_message_html = self._render_template(
-                        prepared["message_html"],
-                        course_name=course["course_name"],
-                        course_ref=course["course_ref"],
-                        course_code=course.get("course_code"),
-                    )
-                    response = client.create_announcement(
-                        course_ref=str(course["course_id"]),
-                        title=rendered_title,
-                        message_html=rendered_message_html,
-                        published=True,
-                        delayed_post_at=publish_at.isoformat(),
-                        lock_comment=prepared["lock_comment"],
-                    )
-                    items.append(
-                        {
-                            "occurrence_index": occurrence_index,
-                            "course_ref_snapshot": course["course_ref"],
-                            "course_id_snapshot": course["course_id"],
-                            "course_name_snapshot": course["course_name"],
-                            "scheduled_for": publish_at,
-                            "canvas_topic_id": response.get("id"),
-                            "canvas_topic_url": response.get("html_url"),
-                            "status": "scheduled",
-                        }
-                    )
-                except Exception as exc:  # noqa: BLE001
-                    failure_count += 1
-                    items.append(
-                        {
-                            "occurrence_index": occurrence_index,
-                            "course_ref_snapshot": course["course_ref"],
-                            "course_id_snapshot": course["course_id"],
-                            "course_name_snapshot": course["course_name"],
-                            "scheduled_for": publish_at,
-                            "status": "error",
-                            "error_message": str(exc),
-                        }
-                    )
+        items, failure_count = self._create_canvas_items(prepared, occurrence_index_start=1)
 
         record = self.recurrence_repository.create_recurrence(
             {
@@ -125,6 +74,79 @@ class AnnouncementRecurrenceService:
             "item": record,
             "created_count": len(items) - failure_count,
             "failure_count": failure_count,
+        }
+
+    def update_recurrence(self, recurrence_id: str, payload: dict) -> dict:
+        recurrence = self.recurrence_repository.get_recurrence(recurrence_id, active_only=None)
+        if not recurrence:
+            raise ValueError("Recorrencia de avisos nao encontrada.")
+
+        prepared = self._prepare(payload)
+        client = prepared["client"]
+        now = utc_now()
+        replace_item_ids: list[int] = []
+        delete_failure_count = 0
+
+        for item in recurrence["items"]:
+            scheduled_for = self._parse_iso(item.get("scheduled_for"))
+            if not scheduled_for or scheduled_for < now:
+                continue
+            if item.get("status") == "canceled":
+                continue
+
+            canvas_topic_id = item.get("canvas_topic_id")
+            if canvas_topic_id:
+                try:
+                    client.delete_discussion_topic(
+                        course_ref=str(item.get("course_id") or item.get("course_ref")),
+                        topic_id=canvas_topic_id,
+                    )
+                except CanvasApiError:
+                    delete_failure_count += 1
+                    continue
+            replace_item_ids.append(int(item["item_id"]))
+
+        remaining_max_occurrence = max(
+            (
+                int(item.get("occurrence_index") or 0)
+                for item in recurrence["items"]
+                if int(item.get("item_id") or 0) not in set(replace_item_ids)
+            ),
+            default=0,
+        )
+        items, create_failure_count = self._create_canvas_items(
+            prepared,
+            occurrence_index_start=remaining_max_occurrence + 1,
+        )
+        updated = self.recurrence_repository.update_recurrence(
+            recurrence_id,
+            payload={
+                "name": prepared["name"],
+                "title": prepared["title"],
+                "message_html": prepared["message_html"],
+                "lock_comment": prepared["lock_comment"],
+                "target_mode": prepared["target_mode"],
+                "target_config_json": prepared["target_config_json"],
+                "recurrence_type": prepared["recurrence_type"],
+                "interval_value": prepared["interval_value"],
+                "occurrence_count": prepared["occurrence_count"],
+                "first_publish_at": prepared["schedule"][0],
+                "client_timezone": prepared["client_timezone"],
+                "base_url_snapshot": prepared["base_url"],
+                "canvas_user_id": prepared["user"].get("id"),
+                "canvas_user_name": prepared["user"].get("name") or prepared["user"].get("short_name") or "",
+                "last_error": "Parte dos avisos antigos nao pode ser removida do Canvas." if delete_failure_count else ("Houve falhas ao recriar parte dos avisos futuros." if create_failure_count else None),
+            },
+            replace_item_ids=replace_item_ids,
+            new_items=items,
+        )
+        return {
+            "item": updated,
+            "replaced_count": len(replace_item_ids),
+            "delete_failure_count": delete_failure_count,
+            "created_count": len(items) - create_failure_count,
+            "create_failure_count": create_failure_count,
+            "failure_count": delete_failure_count + create_failure_count,
         }
 
     def cancel_recurrence(self, recurrence_id: str, payload: dict) -> dict:
@@ -301,3 +323,59 @@ class AnnouncementRecurrenceService:
         for key, value in context.items():
             rendered = re.sub(r"{{\s*" + re.escape(key) + r"\s*}}", str(value or ""), rendered)
         return rendered
+
+    def _create_canvas_items(self, prepared: dict, *, occurrence_index_start: int) -> tuple[list[dict], int]:
+        client = prepared["client"]
+        items = []
+        failure_count = 0
+
+        for course in prepared["courses"]:
+            for schedule_offset, publish_at in enumerate(prepared["schedule"]):
+                occurrence_index = occurrence_index_start + schedule_offset
+                try:
+                    rendered_title = self._render_template(
+                        prepared["title"],
+                        course_name=course["course_name"],
+                        course_ref=course["course_ref"],
+                        course_code=course.get("course_code"),
+                    )
+                    rendered_message_html = self._render_template(
+                        prepared["message_html"],
+                        course_name=course["course_name"],
+                        course_ref=course["course_ref"],
+                        course_code=course.get("course_code"),
+                    )
+                    response = client.create_announcement(
+                        course_ref=str(course["course_id"]),
+                        title=rendered_title,
+                        message_html=rendered_message_html,
+                        published=True,
+                        delayed_post_at=publish_at.isoformat(),
+                        lock_comment=prepared["lock_comment"],
+                    )
+                    items.append(
+                        {
+                            "occurrence_index": occurrence_index,
+                            "course_ref_snapshot": course["course_ref"],
+                            "course_id_snapshot": course["course_id"],
+                            "course_name_snapshot": course["course_name"],
+                            "scheduled_for": publish_at,
+                            "canvas_topic_id": response.get("id"),
+                            "canvas_topic_url": response.get("html_url"),
+                            "status": "scheduled",
+                        }
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    failure_count += 1
+                    items.append(
+                        {
+                            "occurrence_index": occurrence_index,
+                            "course_ref_snapshot": course["course_ref"],
+                            "course_id_snapshot": course["course_id"],
+                            "course_name_snapshot": course["course_name"],
+                            "scheduled_for": publish_at,
+                            "status": "error",
+                            "error_message": str(exc),
+                        }
+                    )
+        return items, failure_count

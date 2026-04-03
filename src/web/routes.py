@@ -383,6 +383,13 @@ def create_announcement_recurrence():
     return jsonify(result), 201
 
 
+@web.put("/api/announcement-recurrences/<recurrence_id>")
+def update_announcement_recurrence(recurrence_id: str):
+    raw_payload = request.get_json(silent=True) or {}
+    result = services()["announcement_recurrence_service"].update_recurrence(recurrence_id, raw_payload)
+    return jsonify(result)
+
+
 @web.post("/api/announcement-recurrences/<recurrence_id>/cancel")
 def cancel_announcement_recurrence(recurrence_id: str):
     raw_payload = request.get_json(silent=True) or {}

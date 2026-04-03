@@ -1344,6 +1344,73 @@ class AnnouncementRecurrenceRepository:
             session.refresh(row)
             return self._serialize_recurrence(row)
 
+    def update_recurrence(self, public_id: str, *, payload: dict, replace_item_ids: list[int], new_items: list[dict]) -> dict:
+        normalized = str(public_id or "").strip()
+        with self.database.session_scope() as session:
+            row = session.scalar(
+                select(AnnouncementRecurrence)
+                .options(selectinload(AnnouncementRecurrence.items))
+                .where(AnnouncementRecurrence.public_id == normalized)
+            )
+            if row is None:
+                raise ValueError("Recorrencia de avisos nao encontrada.")
+
+            now = utc_now()
+            replace_ids = {int(item_id) for item_id in replace_item_ids}
+            for item in list(row.items):
+                if item.id in replace_ids:
+                    session.delete(item)
+            session.flush()
+
+            row.name = payload["name"]
+            row.title = payload["title"]
+            row.message_html = payload["message_html"]
+            row.lock_comment = bool(payload.get("lock_comment"))
+            row.target_mode = payload.get("target_mode") or "groups"
+            row.target_config_json = payload.get("target_config_json") or {}
+            row.recurrence_type = payload["recurrence_type"]
+            row.interval_value = int(payload["interval_value"])
+            row.occurrence_count = int(payload["occurrence_count"])
+            row.first_publish_at = payload["first_publish_at"]
+            row.client_timezone = payload.get("client_timezone") or "UTC"
+            row.base_url_snapshot = payload.get("base_url_snapshot") or ""
+            row.canvas_user_id = payload.get("canvas_user_id")
+            row.canvas_user_name = payload.get("canvas_user_name") or ""
+            row.last_error = payload.get("last_error")
+            row.is_active = True
+            row.is_deleted = False
+            row.deactivated_at = None
+            row.deleted_at = None
+            row.canceled_at = None
+            row.cancel_reason = None
+            row.activated_at = row.activated_at or now
+            row.updated_at = now
+
+            for item in new_items:
+                session.add(
+                    AnnouncementRecurrenceItem(
+                        recurrence_id=row.id,
+                        occurrence_index=int(item["occurrence_index"]),
+                        course_ref_snapshot=item.get("course_ref_snapshot") or "",
+                        course_id_snapshot=item.get("course_id_snapshot"),
+                        course_name_snapshot=item.get("course_name_snapshot") or "",
+                        scheduled_for=item["scheduled_for"],
+                        canvas_topic_id=item.get("canvas_topic_id"),
+                        canvas_topic_url=item.get("canvas_topic_url"),
+                        status=item.get("status") or "scheduled",
+                        error_message=item.get("error_message"),
+                        deleted_on_canvas=bool(item.get("deleted_on_canvas")),
+                        canceled_at=item.get("canceled_at"),
+                        created_at=now,
+                        updated_at=now,
+                    )
+                )
+
+            session.flush()
+            session.expire(row, ["items"])
+            session.refresh(row)
+            return self._serialize_recurrence(row)
+
     @staticmethod
     def _serialize_item(row: AnnouncementRecurrenceItem) -> dict:
         return {
