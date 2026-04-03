@@ -87,6 +87,7 @@ class MessageService:
         manual_recipients = bool(payload.get("manual_recipients"))
         selected_user_ids = self._selected_user_ids(payload)
         attachment = self._attachment_payload(payload)
+        personalized_student_name = self._uses_student_name(subject) or self._uses_student_name(message)
 
         if not course_refs:
             raise ValueError("Informe pelo menos uma turma para enviar as mensagens.")
@@ -109,11 +110,26 @@ class MessageService:
             effective_strategy=effective_strategy,
             dry_run=dry_run,
             dedupe=dedupe,
+            personalized_student_name=personalized_student_name,
             canvas_user_id=user.get("id"),
             canvas_user_name=user.get("name") or user.get("short_name") or "",
         )
 
-        if requested_strategy == "context" and (dedupe or manual_recipients):
+        if personalized_student_name:
+            effective_strategy = "users_personalized"
+            self.job_manager.add_log(
+                job_id,
+                level="warning",
+                message="A estrategia foi ajustada automaticamente para envio individual por aluno.",
+                data={
+                    "requested_strategy": requested_strategy,
+                    "dedupe": dedupe,
+                    "manual_recipients": manual_recipients,
+                    "personalized_student_name": True,
+                },
+            )
+            self.job_manager.update_metadata(job_id, effective_strategy=effective_strategy)
+        elif requested_strategy == "context" and (dedupe or manual_recipients):
             effective_strategy = "users"
             self.job_manager.add_log(
                 job_id,
@@ -290,7 +306,7 @@ class MessageService:
                 "manual_recipients": manual_recipients,
             }
 
-            if effective_strategy == "users":
+            if effective_strategy in {"users", "users_personalized"}:
                 target_ids = []
                 for student_id in eligible_student_ids:
                     if dedupe and student_id in seen_user_ids:
@@ -301,7 +317,7 @@ class MessageService:
                         seen_user_ids.add(student_id)
                     target_ids.append(student_id)
 
-                result_row["strategy_used"] = "users"
+                result_row["strategy_used"] = effective_strategy
             else:
                 target_ids = eligible_student_ids
                 if len(target_ids) > self.MAX_RECIPIENTS_PER_CALL:
@@ -392,6 +408,87 @@ class MessageService:
                         message="Falha ao enviar mensagem por contexto.",
                         data={"course_id": prepared_course["course_id"], "error": str(exc)},
                     )
+            elif result_row["strategy_used"] == "users_personalized":
+                batch_failures = []
+                students_by_id = {
+                    int(student["id"]): student
+                    for student in prepared_course["students"]
+                    if student.get("id") is not None
+                }
+                for student_id in target_ids:
+                    result_row["batch_count"] += 1
+                    student = students_by_id.get(student_id, {"id": student_id})
+                    rendered_subject = self._render_template(
+                        subject,
+                        course_name=prepared_course["course_name"],
+                        course_ref=prepared_course["course_ref"],
+                        course_code=prepared_course.get("course_code"),
+                        student_name=self._student_name(student),
+                    )
+                    rendered_message = self._render_template(
+                        message,
+                        course_name=prepared_course["course_name"],
+                        course_ref=prepared_course["course_ref"],
+                        course_code=prepared_course.get("course_code"),
+                        student_name=self._student_name(student),
+                    )
+                    try:
+                        response = client.create_conversation(
+                            recipients=[student_id],
+                            subject=rendered_subject,
+                            body=rendered_message,
+                            context_code=prepared_course["context_code"],
+                            force_new=True,
+                            group_conversation=False,
+                            attachment_ids=attachment_ids,
+                        )
+                        result_row["conversation_ids"].extend(self._extract_conversation_ids(response))
+                        result_row["recipients_sent"] += 1
+                        total_recipients_sent += 1
+                    except CanvasApiError as exc:
+                        batch_failures.append(exc.message)
+                        self.job_manager.add_log(
+                            job_id,
+                            level="error",
+                            message="Falha em envio personalizado por aluno.",
+                            data={
+                                "course_id": prepared_course["course_id"],
+                                "student_id": student_id,
+                                "error": exc.to_dict(),
+                            },
+                        )
+                    except Exception as exc:  # noqa: BLE001
+                        batch_failures.append(str(exc))
+                        self.job_manager.add_log(
+                            job_id,
+                            level="error",
+                            message="Erro inesperado em envio personalizado por aluno.",
+                            data={
+                                "course_id": prepared_course["course_id"],
+                                "student_id": student_id,
+                                "error": str(exc),
+                            },
+                        )
+
+                if batch_failures and result_row["recipients_sent"] == 0:
+                    result_row["status"] = "error"
+                elif batch_failures:
+                    result_row["status"] = "partial"
+
+                if batch_failures:
+                    result_row["error"] = " | ".join(batch_failures)
+
+                self.job_manager.add_log(
+                    job_id,
+                    level="info",
+                    message="Envio personalizado por aluno concluido para a turma.",
+                    data={
+                        "course_id": prepared_course["course_id"],
+                        "recipients_sent": result_row["recipients_sent"],
+                        "batch_count": result_row["batch_count"],
+                        "status": result_row["status"],
+                    },
+                )
             else:
                 batch_failures = []
                 rendered_subject = self._render_template(
@@ -524,6 +621,10 @@ class MessageService:
         for key, value in context.items():
             rendered = re.sub(r"{{\s*" + re.escape(key) + r"\s*}}", str(value or ""), rendered)
         return rendered
+
+    @staticmethod
+    def _uses_student_name(template: str) -> bool:
+        return bool(re.search(r"{{\s*student_name\s*}}", str(template or "")))
 
     def _write_report(self, job_id: str, rows: list[dict]) -> str:
         report_filename = f"message-report-{job_id}.csv"

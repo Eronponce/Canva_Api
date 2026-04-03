@@ -220,24 +220,14 @@
               <label class="field">
                 <span>Titulo</span>
                 <input id="announcementTitle" data-template-scope="announcement" type="text" placeholder="Atualizacao importante da disciplina">
-                {% raw %}
-                <small class="field-help">Placeholders disponiveis: {{course_name}}, {{course_ref}}, {{course_code}}</small>
-                {% endraw %}
               </label>
 
               <label class="field">
                 <span>Mensagem HTML simples</span>
                 <textarea id="announcementMessage" data-template-scope="announcement" rows="12" placeholder="<p>Ola turma,</p><p>Segue o recado...</p>"></textarea>
-                {% raw %}
-                <small class="field-help">Use {{course_name}}, {{course_ref}} ou {{course_code}} para personalizar por disciplina.</small>
-                {% endraw %}
               </label>
 
               <div class="template-tools">
-                <div class="template-tool-head">
-                  <strong>Variaveis seguras</strong>
-                  <p>Arraste ou clique nos blocos para inserir sem risco de erro.</p>
-                </div>
                 <div id="announcementTokenPalette" class="token-palette"></div>
               </div>
 
@@ -346,24 +336,14 @@
               <label class="field">
                 <span>Assunto</span>
                 <input id="messageSubject" data-template-scope="message" type="text" placeholder="Aviso importante">
-                {% raw %}
-                <small class="field-help">Placeholders disponiveis: {{course_name}}, {{course_ref}}, {{course_code}}</small>
-                {% endraw %}
               </label>
 
               <label class="field">
                 <span>Mensagem</span>
                 <textarea id="messageBody" data-template-scope="message" rows="12" placeholder="Ola turma,&#10;&#10;Estou enviando este aviso para todos os alunos..."></textarea>
-                {% raw %}
-                <small class="field-help">Use {{course_name}}, {{course_ref}} ou {{course_code}} para personalizar a mensagem por disciplina.</small>
-                {% endraw %}
               </label>
 
               <div class="template-tools">
-                <div class="template-tool-head">
-                  <strong>Variaveis seguras</strong>
-                  <p>Arraste ou clique nos blocos para inserir sem digitar manualmente.</p>
-                </div>
                 <div id="messageTokenPalette" class="token-palette"></div>
               </div>
 
@@ -479,24 +459,14 @@
               <label class="field">
                 <span>Titulo do aviso</span>
                 <input id="recurrenceTitle" data-template-scope="recurrence" type="text" placeholder="Encontro semanal da disciplina">
-                {% raw %}
-                <small class="field-help">Placeholders disponiveis: {{course_name}}, {{course_ref}}, {{course_code}}</small>
-                {% endraw %}
               </label>
 
               <label class="field">
                 <span>Mensagem HTML simples</span>
                 <textarea id="recurrenceMessage" data-template-scope="recurrence" rows="10" placeholder="<p>Ola turma,</p><p>Nosso encontro acontece hoje as 19h.</p>"></textarea>
-                {% raw %}
-                <small class="field-help">Use {{course_name}}, {{course_ref}} ou {{course_code}} para personalizar cada aviso por curso.</small>
-                {% endraw %}
               </label>
 
               <div class="template-tools">
-                <div class="template-tool-head">
-                  <strong>Variaveis seguras</strong>
-                  <p>Arraste ou clique nos blocos para montar avisos recorrentes sem erro.</p>
-                </div>
                 <div id="recurrenceTokenPalette" class="token-palette"></div>
               </div>
 

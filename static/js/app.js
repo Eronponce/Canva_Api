@@ -38,6 +38,7 @@ const state = {
     groupIds: [],
     courseRefs: [],
     selectAllGroups: false,
+    previewRecipients: [],
   },
   recurrence: {
     mode: "groups",
@@ -83,6 +84,7 @@ function bindEvents() {
     state.courseCatalog = [];
     state.courseCatalogSelection = [];
     state.courseCatalogLoaded = false;
+    clearMessagePreviewRecipients({ updatePreview: false });
     renderConnectionResult(null);
     persistUiState();
   });
@@ -95,6 +97,7 @@ function bindEvents() {
     state.courseCatalog = [];
     state.courseCatalogSelection = [];
     state.courseCatalogLoaded = false;
+    clearMessagePreviewRecipients({ updatePreview: false });
     renderConnectionResult(null);
     persistUiState();
   });
@@ -103,6 +106,7 @@ function bindEvents() {
     state.courseCatalog = [];
     state.courseCatalogSelection = [];
     state.courseCatalogLoaded = false;
+    clearMessagePreviewRecipients({ updatePreview: false });
     renderConnectionResult(null);
     persistUiState();
   });
@@ -160,6 +164,7 @@ function bindEvents() {
   });
   $("#messageAllGroups").addEventListener("change", () => {
     state.message.selectAllGroups = $("#messageAllGroups").checked;
+    clearMessagePreviewRecipients({ updatePreview: false });
     renderTargetControls("message");
     persistUiState();
   });
@@ -279,6 +284,9 @@ function handleDelegatedClick(event) {
   if (modeButton) {
     const kind = modeButton.dataset.kind;
     state[kind].mode = modeButton.dataset.mode;
+    if (kind === "message") {
+      clearMessagePreviewRecipients({ updatePreview: false });
+    }
     if (kind === "engagement") {
       state.engagement.preview = null;
       renderEngagementPreview(null);
@@ -1237,6 +1245,15 @@ function reviewConfirmLabel(kind) {
   return "Confirmar envio para inativos";
 }
 
+function messageReviewStrategyLabel(request = {}) {
+  if (messageUsesStudentName(request)) return "Usuarios individualmente";
+  return request.strategy === "context" ? "Contexto" : "Usuarios";
+}
+
+function messageUsesStudentName(request = {}) {
+  return [request.subject, request.message].some((value) => /{{\s*student_name\s*}}/i.test(String(value || "")));
+}
+
 function renderReviewSummary(kind, data) {
   const summary = data?.summary || {};
   const request = data?.request || {};
@@ -1255,7 +1272,7 @@ function renderReviewSummary(kind, data) {
       metricCard("Turmas", (data.courses || []).length),
       metricCard("Alunos encontrados", summary.total_students_found || 0),
       metricCard("Destinatarios unicos", summary.unique_recipients || 0),
-      metricCard("Estrategia", request.strategy === "context" ? "Contexto" : "Usuarios"),
+      metricCard("Estrategia", messageReviewStrategyLabel(request)),
       metricCard("Deduplicar", request.dedupe ? "Sim" : "Nao"),
       metricCard("Anexo", request.attachment_name || "Sem anexo"),
     ];
@@ -1366,17 +1383,26 @@ function renderReviewMessage(kind, data) {
 
   if (kind === "message") {
     const sampleCourse = firstReviewCourse(data?.courses || []);
-    const previewSubject = renderCourseTemplate(request.subject || "-", sampleCourse);
-    const previewBody = renderCourseTemplate(request.message || "", sampleCourse);
+    const sampleRecipient = Array.isArray(data?.items) && data.items.length
+      ? data.items[0]
+      : firstMessagePreviewRecipient();
+    const sampleStudentName = sampleRecipient?.name || sampleRecipient?.student_name || "Nome do aluno";
+    const previewSubject = renderCourseTemplate(request.subject || "-", sampleCourse, {
+      student_name: sampleStudentName,
+    });
+    const previewBody = renderCourseTemplate(request.message || "", sampleCourse, {
+      student_name: sampleStudentName,
+    });
     return `
       <div class="message-block">
         <strong>${escapeHtml(previewSubject)}</strong>
         <div class="review-target-meta">
-          <span>Estrategia: ${escapeHtml(request.strategy === "context" ? "Contexto da turma" : "Usuarios")}</span>
+          <span>Estrategia: ${escapeHtml(messageUsesStudentName(request) ? "Usuarios individualmente" : (request.strategy === "context" ? "Contexto da turma" : "Usuarios"))}</span>
           <span>Deduplicar: ${request.dedupe ? "Sim" : "Nao"}</span>
           <span>Modo teste: ${request.dry_run ? "Sim" : "Nao"}</span>
           <span>Anexo: ${escapeHtml(request.attachment_name || "Sem anexo")}</span>
-          <span>${sampleCourse ? `Amostra: ${escapeHtml(sampleCourse.course_name || sampleCourse.course_ref || "-")}` : "Sem turma para amostra"}</span>
+          <span>${sampleCourse ? `Turma: ${escapeHtml(sampleCourse.course_name || sampleCourse.course_ref || "-")}` : "Sem turma para amostra"}</span>
+          <span>Aluno: ${escapeHtml(sampleStudentName)}</span>
         </div>
       </div>
       <div class="message-block"><pre>${escapeHtml(previewBody)}</pre></div>
@@ -1638,6 +1664,7 @@ function togglePickerValue(pickerId, value, checked, options = {}) {
     }
     renderTargetSummary(target.kind);
     if (target.kind === "message") {
+      clearMessagePreviewRecipients({ updatePreview: false });
       renderMessageInfoPanel();
     }
     updateTemplatePreviewsForKind(target.kind);
@@ -1861,6 +1888,13 @@ function renderMessageInfoPanel() {
   ` : "Escolha grupos salvos ou cursos especificos para ver o resumo aqui.";
 }
 
+function clearMessagePreviewRecipients(options = {}) {
+  state.message.previewRecipients = [];
+  if (options.updatePreview !== false) {
+    updateMessagePreview();
+  }
+}
+
 function renderEngagementPreview(data) {
   const target = $("#engagementPreviewCard");
   if (!target) return;
@@ -1961,6 +1995,7 @@ const TEMPLATE_SCOPE_CONFIG = {
       { id: "messageBody", label: "Mensagem" },
     ],
     tokens: [
+      { token: "{{student_name}}", label: "Nome do aluno" },
       { token: "{{course_name}}", label: "Nome da disciplina" },
       { token: "{{course_ref}}", label: "Numero do curso" },
       { token: "{{course_code}}", label: "Codigo da disciplina" },
@@ -2326,6 +2361,7 @@ function updateMessagePreview() {
   const preview = $("#messagePreviewPanel");
   if (!preview) return;
   const previewCourse = firstTargetCourse("message");
+  const previewRecipient = firstMessagePreviewRecipient();
   renderTemplateStatus("message");
   if (!previewCourse) {
     preview.classList.add("empty-state");
@@ -2333,12 +2369,22 @@ function updateMessagePreview() {
     return;
   }
   preview.classList.remove("empty-state");
-  const renderedSubject = renderCourseTemplate($("#messageSubject").value.trim() || "Assunto da mensagem", previewCourse);
-  const renderedBody = escapeHtml(renderCourseTemplate($("#messageBody").value.trim() || "Mensagem da caixa de entrada.", previewCourse)).replaceAll("\n", "<br>");
+  const renderedSubject = renderCourseTemplate(
+    $("#messageSubject").value.trim() || "Assunto da mensagem",
+    previewCourse,
+    { student_name: previewRecipient?.name || "Nome do aluno" },
+  );
+  const renderedBody = escapeHtml(
+    renderCourseTemplate(
+      $("#messageBody").value.trim() || "Mensagem da caixa de entrada.",
+      previewCourse,
+      { student_name: previewRecipient?.name || "Nome do aluno" },
+    ),
+  ).replaceAll("\n", "<br>");
   preview.innerHTML = `
     <div class="message-preview-block">
       <strong>${escapeHtml(renderedSubject)}</strong>
-      <div class="compact-meta">Amostra com ${escapeHtml(previewCourse.course_name || previewCourse.course_ref || "-")}</div>
+      <div class="compact-meta">Amostra com ${escapeHtml(previewCourse.course_name || previewCourse.course_ref || "-")} | ${escapeHtml(previewRecipient?.name || "Nome do aluno")}</div>
     </div>
     <div class="message-preview-block message-preview-html">${renderedBody}</div>
   `;
@@ -2401,11 +2447,16 @@ function firstTargetCourse(kind) {
   return pool[0] || null;
 }
 
-function renderCourseTemplate(template, course) {
+function firstMessagePreviewRecipient() {
+  return state.message.previewRecipients?.[0] || null;
+}
+
+function renderCourseTemplate(template, course, extraContext = {}) {
   const context = {
     course_name: course?.course_name || "Nome da disciplina",
     course_ref: course?.course_ref || "0000",
     course_code: course?.course_code || "CURSO000",
+    ...extraContext,
   };
   let rendered = String(template || "");
   Object.entries(context).forEach(([key, value]) => {
@@ -2464,6 +2515,8 @@ async function submitMessageJob(event) {
       method: "POST",
       body: requestBody,
     });
+    state.message.previewRecipients = Array.isArray(response.items) ? response.items : [];
+    updateMessagePreview();
     openSendReviewModal("message", {
       ...response,
       request: {
