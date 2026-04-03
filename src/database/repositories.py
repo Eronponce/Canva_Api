@@ -1,13 +1,24 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, inspect, select, text, update
 from sqlalchemy.orm import selectinload
 
-from src.database.models import Course, CourseGroup, GroupCourse, JobCourseResult, JobLog, JobRun, JobTargetCourse, JobTargetGroup
+from src.database.models import (
+    AnnouncementRecurrence,
+    AnnouncementRecurrenceItem,
+    Course,
+    CourseGroup,
+    GroupCourse,
+    JobCourseResult,
+    JobLog,
+    JobRun,
+    JobTargetCourse,
+    JobTargetGroup,
+)
 from src.utils.time_utils import datetime_to_iso, utc_now
 
 
@@ -29,6 +40,14 @@ def _soft_delete_fields(*, active: bool) -> dict:
         "deleted_at": now,
         "updated_at": now,
     }
+
+
+def _as_utc(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
 
 
 class CourseRepository:
@@ -691,12 +710,18 @@ class ReportRepository:
                 .where(JobRun.created_at >= cutoff)
                 .order_by(JobRun.created_at.desc())
             ).all()
+            recurrences = session.scalars(
+                select(AnnouncementRecurrence)
+                .options(selectinload(AnnouncementRecurrence.items))
+                .order_by(AnnouncementRecurrence.created_at.desc())
+            ).all()
 
         durations = []
-        daily = defaultdict(lambda: {"announcement": 0, "message": 0, "completed": 0, "failed": 0})
+        daily = defaultdict(lambda: {"announcement": 0, "message": 0, "engagement": 0, "completed": 0, "failed": 0})
         by_kind = defaultdict(lambda: {"jobs": 0, "completed": 0, "failed": 0, "dry_run": 0})
         top_courses = defaultdict(lambda: {"course_name": "", "runs": 0, "success": 0, "failure": 0, "recipients_sent": 0, "announcements": 0})
         top_groups = defaultdict(lambda: {"group_name": "", "jobs": 0})
+        top_recurrences = defaultdict(lambda: {"name": "", "total_items": 0, "future_items": 0, "canceled_items": 0})
         recent_failures = []
         total_recipients_sent = 0
         total_announcements = 0
@@ -752,9 +777,26 @@ class ReportRepository:
                         }
                     )
 
+        now = utc_now()
+        for recurrence in recurrences:
+            item_bucket = top_recurrences[recurrence.public_id]
+            item_bucket["name"] = recurrence.name
+            item_bucket["total_items"] = len(recurrence.items)
+            item_bucket["future_items"] = len(
+                [
+                    item
+                    for item in recurrence.items
+                    if (_as_utc(item.scheduled_for) or now) >= now and item.status in {"scheduled", "created"}
+                ]
+            )
+            item_bucket["canceled_items"] = len(
+                [item for item in recurrence.items if item.status == "canceled"]
+            )
+
         total_jobs = len(jobs)
         completed_jobs = len([item for item in jobs if item.status == "completed"])
         failed_jobs = len([item for item in jobs if item.status == "failed"])
+        active_recurrences = len([item for item in recurrences if item.is_active and not item.is_deleted])
         overview = {
             "days": days,
             "total_jobs": total_jobs,
@@ -765,12 +807,32 @@ class ReportRepository:
             "total_recipients_sent": total_recipients_sent,
             "total_announcements_created": total_announcements,
             "total_engagement_jobs": by_kind.get("engagement", {}).get("jobs", 0),
+            "active_recurrences": active_recurrences,
         }
 
         daily_items = [{"date": key, **value} for key, value in sorted(daily.items(), key=lambda item: item[0], reverse=True)]
         by_kind_items = [{"kind": key, **value} for key, value in sorted(by_kind.items(), key=lambda item: item[0])]
         top_course_items = [{"course_ref": key, **value} for key, value in sorted(top_courses.items(), key=lambda item: item[1]["runs"], reverse=True)[:10]]
         top_group_items = [{"group_id": key, **value} for key, value in sorted(top_groups.items(), key=lambda item: item[1]["jobs"], reverse=True)[:10]]
+        recurrence_items = [{"recurrence_id": key, **value} for key, value in sorted(top_recurrences.items(), key=lambda item: item[1]["total_items"], reverse=True)[:10]]
+        upcoming_recurrence_items = [
+            {
+                "recurrence_id": item.public_id,
+                "name": item.name,
+                "title": item.title,
+                "first_publish_at": datetime_to_iso(item.first_publish_at),
+                "occurrence_count": item.occurrence_count,
+                "future_items": len(
+                    [
+                        recurrence_item
+                        for recurrence_item in item.items
+                        if (_as_utc(recurrence_item.scheduled_for) or now) >= now and recurrence_item.status in {"scheduled", "created"}
+                    ]
+                ),
+            }
+            for item in recurrences
+            if item.is_active and not item.is_deleted
+        ][:10]
 
         return {
             "overview": overview,
@@ -779,8 +841,193 @@ class ReportRepository:
                 "daily_volume": {"title": "Volume diario", "items": daily_items},
                 "top_courses": {"title": "Cursos mais movimentados", "items": top_course_items},
                 "top_groups": {"title": "Grupos mais usados", "items": top_group_items},
+                "active_recurrences": {"title": "Recorrencias mais carregadas", "items": recurrence_items},
+                "upcoming_recurrences": {"title": "Recorrencias ativas", "items": upcoming_recurrence_items},
                 "recent_failures": {"title": "Falhas recentes", "items": recent_failures[:15]},
             },
+        }
+
+
+class AnnouncementRecurrenceRepository:
+    def __init__(self, database):
+        self.database = database
+
+    def list_recurrences(self, *, active_only: bool | None = True) -> list[dict]:
+        with self.database.session_scope() as session:
+            stmt = (
+                select(AnnouncementRecurrence)
+                .options(selectinload(AnnouncementRecurrence.items))
+                .order_by(AnnouncementRecurrence.created_at.desc())
+            )
+            if active_only is True:
+                stmt = stmt.where(AnnouncementRecurrence.is_active.is_(True), AnnouncementRecurrence.is_deleted.is_(False))
+            elif active_only is False:
+                stmt = stmt.where(AnnouncementRecurrence.is_active.is_(False))
+            rows = session.scalars(stmt).all()
+            return [self._serialize_recurrence(item) for item in rows]
+
+    def get_recurrence(self, public_id: str, *, active_only: bool | None = None) -> dict | None:
+        normalized = str(public_id or "").strip()
+        if not normalized:
+            return None
+        with self.database.session_scope() as session:
+            stmt = (
+                select(AnnouncementRecurrence)
+                .options(selectinload(AnnouncementRecurrence.items))
+                .where(AnnouncementRecurrence.public_id == normalized)
+            )
+            if active_only is True:
+                stmt = stmt.where(AnnouncementRecurrence.is_active.is_(True), AnnouncementRecurrence.is_deleted.is_(False))
+            row = session.scalar(stmt)
+            return self._serialize_recurrence(row) if row else None
+
+    def create_recurrence(self, payload: dict, items: list[dict]) -> dict:
+        now = utc_now()
+        with self.database.session_scope() as session:
+            row = AnnouncementRecurrence(
+                public_id=uuid4().hex[:12],
+                name=payload["name"],
+                title=payload["title"],
+                message_html=payload["message_html"],
+                lock_comment=bool(payload.get("lock_comment")),
+                target_mode=payload.get("target_mode") or "groups",
+                target_config_json=payload.get("target_config_json") or {},
+                recurrence_type=payload["recurrence_type"],
+                interval_value=int(payload["interval_value"]),
+                occurrence_count=int(payload["occurrence_count"]),
+                first_publish_at=payload["first_publish_at"],
+                client_timezone=payload.get("client_timezone") or "UTC",
+                base_url_snapshot=payload.get("base_url_snapshot") or "",
+                canvas_user_id=payload.get("canvas_user_id"),
+                canvas_user_name=payload.get("canvas_user_name") or "",
+                last_error=payload.get("last_error"),
+                created_at=now,
+                updated_at=now,
+                activated_at=now,
+            )
+            session.add(row)
+            session.flush()
+
+            for item in items:
+                session.add(
+                    AnnouncementRecurrenceItem(
+                        recurrence_id=row.id,
+                        occurrence_index=int(item["occurrence_index"]),
+                        course_ref_snapshot=item.get("course_ref_snapshot") or "",
+                        course_id_snapshot=item.get("course_id_snapshot"),
+                        course_name_snapshot=item.get("course_name_snapshot") or "",
+                        scheduled_for=item["scheduled_for"],
+                        canvas_topic_id=item.get("canvas_topic_id"),
+                        canvas_topic_url=item.get("canvas_topic_url"),
+                        status=item.get("status") or "scheduled",
+                        error_message=item.get("error_message"),
+                        deleted_on_canvas=bool(item.get("deleted_on_canvas")),
+                        canceled_at=item.get("canceled_at"),
+                        created_at=now,
+                        updated_at=now,
+                    )
+                )
+
+            session.flush()
+            session.refresh(row)
+            return self._serialize_recurrence(row)
+
+    def cancel_recurrence(self, public_id: str, *, cancel_reason: str, item_updates: list[dict]) -> dict:
+        normalized = str(public_id or "").strip()
+        with self.database.session_scope() as session:
+            row = session.scalar(
+                select(AnnouncementRecurrence)
+                .options(selectinload(AnnouncementRecurrence.items))
+                .where(AnnouncementRecurrence.public_id == normalized)
+            )
+            if row is None:
+                raise ValueError("Recorrencia de avisos nao encontrada.")
+
+            now = utc_now()
+            row.is_active = False
+            row.is_deleted = False
+            row.deactivated_at = now
+            row.canceled_at = now
+            row.cancel_reason = cancel_reason or ""
+            row.updated_at = now
+
+            updates_by_id = {int(item["item_id"]): item for item in item_updates if item.get("item_id") is not None}
+            for item in row.items:
+                update_data = updates_by_id.get(item.id)
+                if not update_data:
+                    continue
+                item.status = update_data.get("status") or item.status
+                item.error_message = update_data.get("error_message")
+                item.deleted_on_canvas = bool(update_data.get("deleted_on_canvas"))
+                item.canceled_at = update_data.get("canceled_at") or now
+                item.updated_at = now
+
+            session.flush()
+            session.refresh(row)
+            return self._serialize_recurrence(row)
+
+    @staticmethod
+    def _serialize_item(row: AnnouncementRecurrenceItem) -> dict:
+        return {
+            "item_id": row.id,
+            "occurrence_index": row.occurrence_index,
+            "course_ref": row.course_ref_snapshot,
+            "course_id": row.course_id_snapshot,
+            "course_name": row.course_name_snapshot,
+            "scheduled_for": datetime_to_iso(row.scheduled_for),
+            "canvas_topic_id": row.canvas_topic_id,
+            "canvas_topic_url": row.canvas_topic_url,
+            "status": row.status,
+            "error_message": row.error_message,
+            "deleted_on_canvas": row.deleted_on_canvas,
+            "canceled_at": datetime_to_iso(row.canceled_at),
+            "created_at": datetime_to_iso(row.created_at),
+            "updated_at": datetime_to_iso(row.updated_at),
+        }
+
+    @classmethod
+    def _serialize_recurrence(cls, row: AnnouncementRecurrence | None) -> dict | None:
+        if row is None:
+            return None
+        now = utc_now()
+        items = [cls._serialize_item(item) for item in sorted(row.items, key=lambda entry: (entry.scheduled_for, entry.course_ref_snapshot, entry.occurrence_index))]
+        future_items = [
+            item
+            for item in row.items
+            if (_as_utc(item.scheduled_for) or now) >= now and item.status in {"scheduled", "created"}
+        ]
+        return {
+            "id": row.public_id,
+            "name": row.name,
+            "title": row.title,
+            "message_html": row.message_html,
+            "lock_comment": row.lock_comment,
+            "target_mode": row.target_mode,
+            "target_config_json": row.target_config_json or {},
+            "recurrence_type": row.recurrence_type,
+            "interval_value": row.interval_value,
+            "occurrence_count": row.occurrence_count,
+            "first_publish_at": datetime_to_iso(row.first_publish_at),
+            "client_timezone": row.client_timezone,
+            "base_url_snapshot": row.base_url_snapshot,
+            "canvas_user_id": row.canvas_user_id,
+            "canvas_user_name": row.canvas_user_name,
+            "cancel_reason": row.cancel_reason,
+            "canceled_at": datetime_to_iso(row.canceled_at),
+            "last_error": row.last_error,
+            "is_active": row.is_active,
+            "is_deleted": row.is_deleted,
+            "created_at": datetime_to_iso(row.created_at),
+            "updated_at": datetime_to_iso(row.updated_at),
+            "activated_at": datetime_to_iso(row.activated_at),
+            "deactivated_at": datetime_to_iso(row.deactivated_at),
+            "deleted_at": datetime_to_iso(row.deleted_at),
+            "total_items": len(items),
+            "future_items": len(future_items),
+            "canceled_items": len([item for item in row.items if item.status == "canceled"]),
+            "error_items": len([item for item in row.items if item.status == "error"]),
+            "next_publish_at": datetime_to_iso(min((item.scheduled_for for item in future_items), default=None)),
+            "items": items,
         }
 
 
@@ -790,7 +1037,15 @@ class DatabaseAdminRepository:
 
     def wipe_all_data(self) -> dict:
         with self.database.session_scope() as session:
+            inspector = inspect(session.bind)
+            legacy_tables = {
+                table_name
+                for table_name in ("campaign_runs", "campaign_schedules", "campaign_templates")
+                if inspector.has_table(table_name)
+            }
             counts = {
+                "announcement_recurrence_items": session.query(AnnouncementRecurrenceItem).count(),
+                "announcement_recurrences": session.query(AnnouncementRecurrence).count(),
                 "job_logs": session.query(JobLog).count(),
                 "job_course_results": session.query(JobCourseResult).count(),
                 "job_target_courses": session.query(JobTargetCourse).count(),
@@ -800,6 +1055,12 @@ class DatabaseAdminRepository:
                 "course_groups": session.query(CourseGroup).count(),
                 "courses": session.query(Course).count(),
             }
+            for table_name in sorted(legacy_tables):
+                counts[table_name] = session.execute(text(f"SELECT COUNT(*) FROM {table_name}")).scalar_one()
+            session.execute(delete(AnnouncementRecurrenceItem))
+            session.execute(delete(AnnouncementRecurrence))
+            for table_name in sorted(legacy_tables):
+                session.execute(text(f"DELETE FROM {table_name}"))
             session.execute(delete(JobLog))
             session.execute(delete(JobCourseResult))
             session.execute(delete(JobTargetCourse))

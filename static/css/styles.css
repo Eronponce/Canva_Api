@@ -236,6 +236,7 @@ code,
 
 .panel-grid-connection,
 .panel-grid-organization,
+.panel-grid-recurrence,
 .panel-grid-settings,
 .panel-grid-reports,
 .panel-grid-announcements,
@@ -990,6 +991,10 @@ th {
   background: rgba(8, 12, 18, 0.55);
 }
 
+.text-danger {
+  color: #ffb4b4;
+}
+
 .modal {
   position: fixed;
   inset: 0;
@@ -1013,6 +1018,10 @@ th {
   padding: 16px;
 }
 
+.modal-dialog.modal-wide {
+  width: min(1100px, calc(100vw - 24px));
+}
+
 pre {
   margin: 8px 0 0;
   white-space: pre-wrap;
@@ -1022,7 +1031,8 @@ pre {
 @media (max-width: 1480px) {
   .panel-grid-announcements,
   .panel-grid-messages,
-  .panel-grid-engagement {
+  .panel-grid-engagement,
+  .panel-grid-recurrence {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
@@ -1031,6 +1041,7 @@ pre {
   .brand-row,
   .panel-grid-connection,
   .panel-grid-organization,
+  .panel-grid-recurrence,
   .panel-grid-settings,
   .panel-grid-reports,
   .field-grid,
@@ -1052,7 +1063,8 @@ pre {
 
   .panel-grid-announcements,
   .panel-grid-messages,
-  .panel-grid-engagement {
+  .panel-grid-engagement,
+  .panel-grid-recurrence {
     grid-template-columns: 1fr;
   }
 

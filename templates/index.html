@@ -39,29 +39,36 @@
             <small>anuncios</small>
           </span>
         </button>
-        <button class="tab-button" data-tab="messages" type="button">
+        <button class="tab-button" data-tab="recurrence" type="button">
           <span class="tab-step">04</span>
+          <span class="tab-copy">
+            <strong>Recorrencia</strong>
+            <small>avisos agendados</small>
+          </span>
+        </button>
+        <button class="tab-button" data-tab="messages" type="button">
+          <span class="tab-step">05</span>
           <span class="tab-copy">
             <strong>Caixa de entrada</strong>
             <small>mensagens</small>
           </span>
         </button>
         <button class="tab-button" data-tab="engagement" type="button">
-          <span class="tab-step">05</span>
+          <span class="tab-step">06</span>
           <span class="tab-copy">
             <strong>Inativos</strong>
             <small>mensagem automatica</small>
           </span>
         </button>
         <button class="tab-button" data-tab="settings" type="button">
-          <span class="tab-step">06</span>
+          <span class="tab-step">07</span>
           <span class="tab-copy">
             <strong>Configuracoes</strong>
             <small>.env local</small>
           </span>
         </button>
         <button class="tab-button" data-tab="reports" type="button">
-          <span class="tab-step">07</span>
+          <span class="tab-step">08</span>
           <span class="tab-copy">
             <strong>Relatorios</strong>
             <small>historico e csv</small>
@@ -377,6 +384,120 @@
         </article>
       </section>
 
+      <section id="tab-recurrence" class="tab-panel">
+        <div class="panel-grid panel-grid-recurrence">
+          <article class="card">
+            <div class="card-header">
+              <div>
+                <h2>Destino</h2>
+                <p>Monte o conjunto de cursos para os avisos recorrentes.</p>
+              </div>
+            </div>
+
+            <div class="mode-switch" id="recurrenceModeSwitch">
+              <button class="mode-button active" type="button" data-kind="recurrence" data-mode="groups">Grupos salvos</button>
+              <button class="mode-button" type="button" data-kind="recurrence" data-mode="courses">Cursos especificos</button>
+              <label class="switch-line" id="recurrenceAllGroupsLine">
+                <input id="recurrenceAllGroups" class="switch-input" type="checkbox">
+                <span class="switch-track" aria-hidden="true"></span>
+                <span class="switch-copy">Usar todos os grupos</span>
+              </label>
+            </div>
+
+            <div id="recurrenceGroupPicker" class="picker-shell"></div>
+            <div id="recurrenceCoursePicker" class="picker-shell hidden"></div>
+            <div id="recurrenceTargetSummary" class="summary-grid"></div>
+          </article>
+
+          <article class="card">
+            <div class="card-header">
+              <div>
+                <h2>Configuracao</h2>
+                <p>O painel cria varios avisos agendados no proprio Canvas usando `delayed_post_at`.</p>
+              </div>
+            </div>
+
+            <form id="recurrenceForm" class="stack-form">
+              <label class="field">
+                <span>Nome interno</span>
+                <input id="recurrenceName" type="text" placeholder="Ex.: Encontro semanal quinta 19h">
+              </label>
+
+              <label class="field">
+                <span>Titulo do aviso</span>
+                <input id="recurrenceTitle" type="text" placeholder="Encontro semanal da disciplina">
+              </label>
+
+              <label class="field">
+                <span>Mensagem HTML simples</span>
+                <textarea id="recurrenceMessage" rows="10" placeholder="<p>Ola turma,</p><p>Nosso encontro acontece hoje as 19h.</p>"></textarea>
+              </label>
+
+              <div class="field-grid">
+                <label class="field">
+                  <span>Frequencia</span>
+                  <select id="recurrenceType">
+                    <option value="weekly">Semanal</option>
+                    <option value="daily">Diaria</option>
+                  </select>
+                </label>
+
+                <label class="field">
+                  <span>Intervalo</span>
+                  <input id="recurrenceInterval" type="number" min="1" value="1">
+                </label>
+              </div>
+
+              <div class="field-grid">
+                <label class="field">
+                  <span>Primeira publicacao</span>
+                  <input id="recurrenceFirstPublishAt" type="datetime-local">
+                </label>
+
+                <label class="field">
+                  <span>Quantidade de ocorrencias</span>
+                  <input id="recurrenceOccurrences" type="number" min="1" value="8">
+                </label>
+              </div>
+
+              <div class="switch-stack">
+                <label class="switch-line">
+                  <input id="recurrenceLockComment" class="switch-input" type="checkbox">
+                  <span class="switch-track" aria-hidden="true"></span>
+                  <span class="switch-copy">Bloquear comentarios nos avisos</span>
+                </label>
+              </div>
+
+              <div class="button-row">
+                <button id="previewRecurrenceBtn" class="btn btn-secondary" type="button">Prever datas</button>
+                <button class="btn btn-primary" type="submit">Criar recorrencia</button>
+              </div>
+            </form>
+
+            <div class="card-subsection">
+              <div class="subsection-header">
+                <div>
+                  <h3>Previsao</h3>
+                  <p>Confira as proximas datas antes de criar os avisos no Canvas.</p>
+                </div>
+              </div>
+              <div id="recurrencePreviewSummary" class="summary-grid"></div>
+              <div id="recurrenceSchedulePreview" class="compact-list empty-state">Selecione as turmas e clique em prever datas.</div>
+            </div>
+          </article>
+
+          <article class="card span-two">
+            <div class="card-header">
+              <div>
+                <h2>Recorrencias criadas</h2>
+                <p>Cancelar remove do Canvas apenas os avisos futuros ainda nao publicados. Os ja publicados ficam no historico do curso.</p>
+              </div>
+            </div>
+            <div id="recurrenceList" class="compact-list empty-state">Nenhuma recorrencia criada.</div>
+          </article>
+        </div>
+      </section>
+
       <section id="tab-engagement" class="tab-panel">
         <div class="panel-grid panel-grid-engagement">
           <article class="card span-two engagement-toolbar-card">
@@ -412,6 +533,45 @@
                     <option value="incomplete_resources">Somente com recursos pendentes</option>
                   </select>
                 </label>
+
+                <label class="field">
+                  <span>Combinar regras com</span>
+                  <select id="engagementMatchMode">
+                    <option value="or">OU</option>
+                    <option value="and">E</option>
+                  </select>
+                </label>
+
+                <div class="field-grid">
+                  <label class="field">
+                    <span>Sem atividade ha</span>
+                    <input id="engagementInactiveDays" type="number" min="0" placeholder="Ex.: 14">
+                    <small class="field-help">Usa `last_activity_at` dos enrollments.</small>
+                  </label>
+                  <label class="field">
+                    <span>Atividade total ate</span>
+                    <input id="engagementMaxActivityMinutes" type="number" min="0" placeholder="Minutos">
+                    <small class="field-help">Usa `total_activity_time` do Canvas.</small>
+                  </label>
+                </div>
+
+                <div class="switch-stack">
+                  <label class="switch-line">
+                    <input id="engagementOnlyModules" class="switch-input" type="checkbox">
+                    <span class="switch-track" aria-hidden="true"></span>
+                    <span class="switch-copy">Exigir cursos com requisitos de modulos</span>
+                  </label>
+                  <label class="switch-line">
+                    <input id="engagementRequireNeverAccessed" class="switch-input" type="checkbox">
+                    <span class="switch-track" aria-hidden="true"></span>
+                    <span class="switch-copy">Exigir sem acesso nenhum</span>
+                  </label>
+                  <label class="switch-line">
+                    <input id="engagementRequireIncomplete" class="switch-input" type="checkbox">
+                    <span class="switch-track" aria-hidden="true"></span>
+                    <span class="switch-copy">Exigir recursos pendentes</span>
+                  </label>
+                </div>
 
                 <div class="button-row">
                   <button id="previewEngagementBtn" class="btn btn-secondary" type="button">Buscar quantidade por turma</button>
@@ -542,9 +702,11 @@
               <code>GET /api/v1/courses</code>
               <code>GET /api/v1/courses/:course_id</code>
               <code>GET /api/v1/courses/:course_id/users?enrollment_type[]=student</code>
+              <code>GET /api/v1/courses/:course_id/enrollments?type[]=StudentEnrollment</code>
               <code>GET /api/v1/courses/:course_id/analytics/student_summaries</code>
               <code>GET /api/v1/courses/:course_id/bulk_user_progress</code>
               <code>POST /api/v1/courses/:course_id/discussion_topics</code>
+              <code>DELETE /api/v1/courses/:course_id/discussion_topics/:topic_id</code>
               <code>GET /api/v1/search/recipients</code>
               <code>POST /api/v1/conversations</code>
             </div>

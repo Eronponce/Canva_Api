@@ -56,6 +56,7 @@ def get_config():
             "settings": app_config.public_settings(),
             "groups": course_service.list_groups()["items"],
             "registered_courses": course_service.list_registered_courses()["items"],
+            "announcement_recurrences": services()["announcement_recurrence_service"].list_recurrences(include_inactive=True)["items"],
         }
     )
 
@@ -295,6 +296,37 @@ def create_engagement_job():
         payload,
     )
     return jsonify({"job": job}), 202
+
+
+@web.post("/api/announcement-recurrences/preview")
+def preview_announcement_recurrence():
+    raw_payload = request.get_json(silent=True) or {}
+    result = services()["announcement_recurrence_service"].preview(raw_payload)
+    return jsonify(result)
+
+
+@web.get("/api/announcement-recurrences")
+def list_announcement_recurrences():
+    return jsonify(services()["announcement_recurrence_service"].list_recurrences(include_inactive=_include_inactive()))
+
+
+@web.get("/api/announcement-recurrences/<recurrence_id>")
+def get_announcement_recurrence(recurrence_id: str):
+    return jsonify(services()["announcement_recurrence_service"].get_recurrence(recurrence_id, include_inactive=_include_inactive()))
+
+
+@web.post("/api/announcement-recurrences")
+def create_announcement_recurrence():
+    raw_payload = request.get_json(silent=True) or {}
+    result = services()["announcement_recurrence_service"].create_recurrence(raw_payload)
+    return jsonify(result), 201
+
+
+@web.post("/api/announcement-recurrences/<recurrence_id>/cancel")
+def cancel_announcement_recurrence(recurrence_id: str):
+    raw_payload = request.get_json(silent=True) or {}
+    result = services()["announcement_recurrence_service"].cancel_recurrence(recurrence_id, raw_payload)
+    return jsonify(result)
 
 
 @web.get("/api/jobs/<job_id>")

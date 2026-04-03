@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from src.services.canvas_client import CanvasApiError
@@ -109,8 +110,11 @@ class EngagementService:
                 "manual_recipients": True,
                 "analytics_available": course["analytics_available"],
                 "progress_available": course["progress_available"],
+                "enrollment_activity_available": course.get("enrollment_activity_available"),
                 "never_accessed_matches": course["never_accessed_matches"],
                 "incomplete_resources_matches": course["incomplete_resources_matches"],
+                "inactive_days_matches": course.get("inactive_days_matches", 0),
+                "low_activity_matches": course.get("low_activity_matches", 0),
                 "matched_students_preview": [item["student_name"] for item in matched_items[:10]],
             }
 
@@ -212,6 +216,8 @@ class EngagementService:
                         "student_name": item["student_name"],
                         "page_views": item["page_views"],
                         "participations": item["participations"],
+                        "last_activity_at": item.get("last_activity_at"),
+                        "total_activity_time_seconds": item.get("total_activity_time_seconds"),
                         "requirement_count": item["requirement_count"],
                         "requirement_completed_count": item["requirement_completed_count"],
                         "completed_at": item["completed_at"],
@@ -266,6 +272,7 @@ class EngagementService:
     def _evaluate_targets(self, payload: dict) -> dict:
         course_refs = parse_course_references(payload.get("course_ids_text", ""))
         criteria = self._normalize_criteria(payload.get("criteria_mode"))
+        criteria_config = self._normalize_criteria_config(payload.get("criteria_config"))
         if not course_refs:
             raise ValueError("Selecione pelo menos um grupo ou curso para a busca ativa.")
 
@@ -276,6 +283,8 @@ class EngagementService:
         total_matched_students = 0
         total_never_accessed_matches = 0
         total_incomplete_matches = 0
+        total_inactive_days_matches = 0
+        total_low_activity_matches = 0
         courses_without_module_requirements = 0
         analytics_unavailable_courses = 0
         progress_unavailable_courses = 0
@@ -315,10 +324,27 @@ class EngagementService:
                 progress_error = str(exc)
                 progress_unavailable_courses += 1
 
+            enrollments_by_user_id = {}
+            enrollment_activity_available = True
+            enrollment_error = None
+            try:
+                enrollment_rows = client.list_course_student_enrollments(str(course.get("id")))
+                enrollments_by_user_id = {
+                    int(item.get("user_id")): item
+                    for item in enrollment_rows
+                    if item.get("user_id") is not None
+                }
+            except Exception as exc:  # noqa: BLE001
+                enrollment_activity_available = False
+                enrollment_error = str(exc)
+
             matched_students = 0
             never_accessed_matches = 0
             incomplete_matches = 0
+            inactive_days_matches = 0
+            low_activity_matches = 0
             course_has_module_requirements = False
+            cutoff_dt = self._cutoff_dt(criteria_config.get("inactive_days"))
 
             for student in students:
                 user_id = student.get("id")
@@ -327,11 +353,14 @@ class EngagementService:
 
                 analytics_row = analytics_by_user_id.get(int(user_id), {})
                 progress_row = progress_by_user_id.get(int(user_id), {})
+                enrollment_row = enrollments_by_user_id.get(int(user_id), {})
                 page_views = int(analytics_row.get("page_views") or 0)
                 participations = int(analytics_row.get("participations") or 0)
                 requirement_count = int(progress_row.get("requirement_count") or 0)
                 requirement_completed_count = int(progress_row.get("requirement_completed_count") or 0)
                 completed_at = progress_row.get("completed_at")
+                last_activity_at = enrollment_row.get("last_activity_at")
+                total_activity_time = int(enrollment_row.get("total_activity_time") or 0)
 
                 if requirement_count > 0:
                     course_has_module_requirements = True
@@ -342,6 +371,15 @@ class EngagementService:
                     and requirement_count > 0
                     and requirement_completed_count < requirement_count
                 )
+                has_inactive_days = self._is_inactive_since(
+                    last_activity_at=last_activity_at,
+                    cutoff_dt=cutoff_dt,
+                    has_never_accessed=has_never_accessed,
+                )
+                has_low_total_activity = self._has_low_total_activity(
+                    total_activity_time=total_activity_time,
+                    max_total_activity_minutes=criteria_config.get("max_total_activity_minutes"),
+                )
 
                 reasons = []
                 if has_never_accessed:
@@ -350,14 +388,25 @@ class EngagementService:
                 if has_incomplete_resources:
                     reasons.append(self.CRITERIA_INCOMPLETE_RESOURCES)
                     incomplete_matches += 1
+                if has_inactive_days:
+                    reasons.append("inactive_days")
+                    inactive_days_matches += 1
+                if has_low_total_activity:
+                    reasons.append("low_total_activity")
+                    low_activity_matches += 1
 
-                if not self._matches_criteria(criteria, reasons):
+                if criteria_config.get("only_with_module_requirements") and not course_has_module_requirements:
+                    continue
+
+                if not self._matches_criteria(criteria, reasons, criteria_config):
                     continue
 
                 matched_students += 1
                 total_matched_students += 1
                 total_never_accessed_matches += 1 if has_never_accessed else 0
                 total_incomplete_matches += 1 if has_incomplete_resources else 0
+                total_inactive_days_matches += 1 if has_inactive_days else 0
+                total_low_activity_matches += 1 if has_low_total_activity else 0
 
                 items.append(
                     {
@@ -368,11 +417,13 @@ class EngagementService:
                         "student_name": self._student_name(student),
                         "page_views": page_views,
                         "participations": participations,
+                        "last_activity_at": last_activity_at,
+                        "total_activity_time_seconds": total_activity_time,
                         "requirement_count": requirement_count,
                         "requirement_completed_count": requirement_completed_count,
                         "completed_at": completed_at,
                         "reasons": reasons,
-                        "reasons_label": self._reasons_label(reasons),
+                        "reasons_label": self._reasons_label(reasons, criteria_config),
                     }
                 )
 
@@ -388,10 +439,14 @@ class EngagementService:
                     "matched_students": matched_students,
                     "never_accessed_matches": never_accessed_matches,
                     "incomplete_resources_matches": incomplete_matches,
+                    "inactive_days_matches": inactive_days_matches,
+                    "low_activity_matches": low_activity_matches,
                     "analytics_available": analytics_available,
                     "analytics_error": analytics_error,
                     "progress_available": progress_available,
                     "progress_error": progress_error,
+                    "enrollment_activity_available": enrollment_activity_available,
+                    "enrollment_error": enrollment_error,
                     "has_module_requirements": course_has_module_requirements,
                 }
             )
@@ -404,9 +459,12 @@ class EngagementService:
                 "total_matched_students": total_matched_students,
                 "total_never_accessed_matches": total_never_accessed_matches,
                 "total_incomplete_resources_matches": total_incomplete_matches,
+                "total_inactive_days_matches": total_inactive_days_matches,
+                "total_low_activity_matches": total_low_activity_matches,
                 "courses_without_module_requirements": courses_without_module_requirements,
                 "analytics_unavailable_courses": analytics_unavailable_courses,
                 "progress_unavailable_courses": progress_unavailable_courses,
+                "criteria_config": criteria_config,
             },
             "courses": courses,
             "items": sorted(
@@ -427,21 +485,86 @@ class EngagementService:
         return value
 
     @classmethod
-    def _matches_criteria(cls, criteria: str, reasons: list[str]) -> bool:
+    def _matches_criteria(cls, criteria: str, reasons: list[str], criteria_config: dict | None = None) -> bool:
+        criteria_config = criteria_config or {}
+        match_mode = "and" if str(criteria_config.get("match_mode") or "or").strip().lower() == "and" else "or"
+        checks = [cls._matches_base_criteria(criteria, reasons)]
+        if criteria_config.get("require_never_accessed"):
+            checks.append(cls.CRITERIA_NEVER_ACCESSED in reasons)
+        if criteria_config.get("require_incomplete_resources"):
+            checks.append(cls.CRITERIA_INCOMPLETE_RESOURCES in reasons)
+        if criteria_config.get("inactive_days"):
+            checks.append("inactive_days" in reasons)
+        if criteria_config.get("max_total_activity_minutes") is not None:
+            checks.append("low_total_activity" in reasons)
+        checks = [item for item in checks if item is not None]
+        return all(checks) if match_mode == "and" else any(checks)
+
+    @classmethod
+    def _matches_base_criteria(cls, criteria: str, reasons: list[str]) -> bool:
         if criteria == cls.CRITERIA_NEVER_ACCESSED:
             return cls.CRITERIA_NEVER_ACCESSED in reasons
         if criteria == cls.CRITERIA_INCOMPLETE_RESOURCES:
             return cls.CRITERIA_INCOMPLETE_RESOURCES in reasons
-        return bool(reasons)
+        return bool([item for item in reasons if item in {cls.CRITERIA_NEVER_ACCESSED, cls.CRITERIA_INCOMPLETE_RESOURCES}])
 
     @staticmethod
-    def _reasons_label(reasons: list[str]) -> str:
+    def _reasons_label(reasons: list[str], criteria_config: dict | None = None) -> str:
         labels = []
         if "never_accessed" in reasons:
             labels.append("sem acesso nenhum")
         if "incomplete_resources" in reasons:
             labels.append("nao visualizou todos os recursos")
+        if "inactive_days" in reasons:
+            inactive_days = (criteria_config or {}).get("inactive_days")
+            labels.append(f"sem atividade ha {inactive_days} dia(s)" if inactive_days else "sem atividade recente")
+        if "low_total_activity" in reasons:
+            max_minutes = (criteria_config or {}).get("max_total_activity_minutes")
+            labels.append(f"atividade total ate {max_minutes} min" if max_minutes is not None else "atividade total muito baixa")
         return " + ".join(labels) if labels else "-"
+
+    @staticmethod
+    def _normalize_criteria_config(raw_config: dict | None) -> dict:
+        raw_config = raw_config if isinstance(raw_config, dict) else {}
+        match_mode = str(raw_config.get("match_mode") or "or").strip().lower()
+        if match_mode not in {"and", "or"}:
+            match_mode = "or"
+        inactive_days = raw_config.get("inactive_days")
+        max_total_activity_minutes = raw_config.get("max_total_activity_minutes")
+        return {
+            "match_mode": match_mode,
+            "inactive_days": int(inactive_days) if str(inactive_days).strip().isdigit() else None,
+            "max_total_activity_minutes": int(max_total_activity_minutes) if str(max_total_activity_minutes).strip().isdigit() else None,
+            "only_with_module_requirements": bool(raw_config.get("only_with_module_requirements")),
+            "require_never_accessed": bool(raw_config.get("require_never_accessed")),
+            "require_incomplete_resources": bool(raw_config.get("require_incomplete_resources")),
+        }
+
+    @staticmethod
+    def _cutoff_dt(inactive_days: int | None) -> datetime | None:
+        if inactive_days is None:
+            return None
+        return datetime.now(UTC) - timedelta(days=max(int(inactive_days), 0))
+
+    @staticmethod
+    def _is_inactive_since(*, last_activity_at: str | None, cutoff_dt: datetime | None, has_never_accessed: bool) -> bool:
+        if cutoff_dt is None:
+            return False
+        if not last_activity_at:
+            return has_never_accessed
+        try:
+            parsed = datetime.fromisoformat(str(last_activity_at).replace("Z", "+00:00"))
+        except ValueError:
+            return False
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=UTC)
+        return parsed <= cutoff_dt
+
+    @staticmethod
+    def _has_low_total_activity(*, total_activity_time: int, max_total_activity_minutes: int | None) -> bool:
+        if max_total_activity_minutes is None:
+            return False
+        return total_activity_time <= max(0, int(max_total_activity_minutes)) * 60
 
     @staticmethod
     def _render_template(template: str, **context: str) -> str:
@@ -469,6 +592,8 @@ class EngagementService:
             "student_name",
             "page_views",
             "participations",
+            "last_activity_at",
+            "total_activity_time_seconds",
             "requirement_count",
             "requirement_completed_count",
             "completed_at",

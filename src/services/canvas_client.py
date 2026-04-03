@@ -180,6 +180,16 @@ class CanvasClient:
         ]
         return self._iter_paginated(f"/api/v1/courses/{safe_ref}/users", params=params)
 
+    def list_course_student_enrollments(self, course_ref: str) -> list[dict]:
+        safe_ref = quote(str(course_ref), safe=":")
+        params = [
+            ("per_page", "100"),
+            ("type[]", "StudentEnrollment"),
+            ("state[]", "active"),
+            ("include[]", "user"),
+        ]
+        return self._iter_paginated(f"/api/v1/courses/{safe_ref}/enrollments", params=params)
+
     def list_course_student_summaries(self, course_ref: str, *, student_id: int | None = None) -> list[dict]:
         safe_ref = quote(str(course_ref), safe=":")
         params: list[tuple[str, str]] = [("per_page", "100"), ("sort_column", "name")]
@@ -219,6 +229,16 @@ class CanvasClient:
             f"/api/v1/courses/{safe_ref}/discussion_topics",
             data=form_data,
             expected_status=(200, 201),
+        )
+        return payload
+
+    def delete_discussion_topic(self, *, course_ref: str, topic_id: int | str) -> dict | str:
+        safe_ref = quote(str(course_ref), safe=":")
+        safe_topic_id = quote(str(topic_id), safe=":")
+        payload, _ = self._request(
+            "DELETE",
+            f"/api/v1/courses/{safe_ref}/discussion_topics/{safe_topic_id}",
+            expected_status=(200, 204),
         )
         return payload
 

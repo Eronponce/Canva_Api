@@ -8,6 +8,7 @@ Painel web local para operar em lote no Canvas LMS usando apenas endpoints ofici
 - organiza cursos cadastrados e grupos de turmas
 - busca no Canvas os cursos acessiveis e permite cadastrar varios de uma vez
 - publica comunicados em lote
+- cria recorrencias de avisos no proprio Canvas
 - envia mensagens pela caixa de entrada do Canvas em lote
 - envia mensagens para alunos inativos com base em analytics e progresso de modulos
 - registra historico, resultados por turma e exportacao em CSV
@@ -20,15 +21,50 @@ Painel web local para operar em lote no Canvas LMS usando apenas endpoints ofici
 2. `Organizacao`
    cursos cadastrados, catalogo do Canvas e grupos
 3. `Comunicados`
-   anuncios por grupos salvos ou cursos especificos
-4. `Caixa de entrada`
+   anuncios pontuais por grupos salvos ou cursos especificos
+4. `Recorrencia`
+   cria varios avisos futuros no Canvas de uma vez
+5. `Caixa de entrada`
    mensagens em lote por grupos salvos ou cursos especificos
-5. `Inativos`
+6. `Inativos`
    mensagem para alunos sem acesso nenhum ou com recursos pendentes
-6. `Configuracoes`
+7. `Configuracoes`
    resumo operacional, editor do `.env` e zona de perigo
-7. `Relatorios`
+8. `Relatorios`
    historico, analitico e download de CSV
+
+## Como funciona a Recorrencia
+
+O modulo `Recorrencia` e focado em `avisos`.
+
+Em vez de depender de um scheduler local, ele:
+
+1. resolve os cursos alvo
+2. calcula as datas da recorrencia
+3. cria todos os avisos futuros no Canvas usando `Discussion Topics`
+4. usa `delayed_post_at` em cada aviso futuro
+5. guarda localmente os `topic_id` criados para permitir cancelamento depois
+
+### O que isso significa na pratica
+
+- depois que a recorrencia e criada, o Canvas publica os avisos sozinho
+- o painel nao precisa ficar ligado para os avisos futuros sairem
+- cancelar a recorrencia tenta apagar do Canvas apenas os avisos futuros ainda nao publicados
+- avisos ja publicados nao sao removidos automaticamente
+
+### Frequencias suportadas
+
+- `Semanal`
+- `Diaria`
+
+### Quando mudar o dia da reuniao
+
+O fluxo recomendado e:
+
+1. cancelar a recorrencia atual
+2. carregar essa recorrencia como base no formulario
+3. ajustar data, intervalo ou quantidade
+4. criar a nova recorrencia
 
 ## O modulo Inativos
 
@@ -47,6 +83,11 @@ O modulo `Inativos` foi feito para o fluxo:
 - `Com recursos pendentes`
   usa requisitos de modulos nao concluidos
 - `Sem acesso nenhum ou com recursos pendentes`
+- `Sem atividade ha X dias`
+  usa `last_activity_at` dos enrollments
+- `Atividade total ate X minutos`
+  usa `total_activity_time` dos enrollments
+- combinacao avancada `OU` e `E`
 
 ### Importante
 
@@ -68,7 +109,7 @@ O modulo `Inativos` foi feito para o fluxo:
 - `src/web`
   rotas HTTP e respostas JSON
 - `src/domain`
-  regras de negocio de conexao, cursos, grupos, comunicados, mensagens, inativos e `.env`
+  regras de negocio de conexao, cursos, grupos, comunicados, recorrencias, mensagens, inativos e `.env`
 - `src/services`
   cliente da API do Canvas com retry, timeout e paginacao
 - `src/database`
@@ -91,10 +132,11 @@ O modulo `Inativos` foi feito para o fluxo:
 - `GET /api/v1/courses/:course_id/users?enrollment_type[]=student`
 - `GET /api/v1/search/recipients`
 
-### Comunicados
+### Comunicados e recorrencia
 
 - `POST /api/v1/courses/:course_id/discussion_topics`
   com `is_announcement=true`
+- `DELETE /api/v1/courses/:course_id/discussion_topics/:topic_id`
 
 ### Caixa de entrada
 
@@ -104,6 +146,7 @@ O modulo `Inativos` foi feito para o fluxo:
 
 - `GET /api/v1/courses/:course_id/analytics/student_summaries`
 - `GET /api/v1/courses/:course_id/bulk_user_progress`
+- `GET /api/v1/courses/:course_id/enrollments?type[]=StudentEnrollment`
 - `POST /api/v1/conversations`
 
 ## Persistencia de dados
@@ -125,6 +168,7 @@ DATABASE_URL=mysql+pymysql://usuario:senha@localhost:3306/canvas_bulk_panel
 ### Onde os dados ficam
 
 - banco local: cursos, grupos, jobs, logs e resultados
+- banco local: recorrencias de avisos e itens futuros criados no Canvas
 - `.env`: configuracao sensivel local
 - `data/reports/*.csv`: exportacoes de relatorio
 - `logs/`: logs do servidor e do app
@@ -133,6 +177,7 @@ DATABASE_URL=mysql+pymysql://usuario:senha@localhost:3306/canvas_bulk_panel
 
 - excluir curso: `hard delete`
 - excluir grupo: `hard delete`
+- cancelar recorrencia: desativa a recorrencia e tenta apagar os avisos futuros no Canvas
 - apagar banco em `Configuracoes`: `hard delete` das tabelas operacionais
 - `.env` nao entra nessa limpeza
 
@@ -223,18 +268,23 @@ http://127.0.0.1:5000
 2. abra `Organizacao`
 3. use o `Catalogo do Canvas` para carregar e cadastrar os cursos
 4. crie grupos com os cursos desejados
-5. rode `Modo teste` em `Comunicados`, se necessario
-6. rode `Modo teste` em `Caixa de entrada`, se necessario
-7. abra `Inativos`
-8. selecione os grupos ou cursos
-9. clique em `Buscar quantidade por turma`
-10. confira o preview
-11. rode `Modo teste` ou envie de verdade
-12. confira `Relatorios` e baixe o CSV
+5. use `Comunicados` para avisos pontuais
+6. use `Recorrencia` para gerar varios avisos futuros de uma vez
+7. use `Caixa de entrada` para mensagens em lote
+8. use `Inativos` para campanhas direcionadas a quem precisa de acompanhamento
+9. confira `Relatorios` e baixe o CSV quando necessario
 
 ## Como validar em ambiente de teste do Canvas
 
-Para validar o modulo `Inativos` com seguranca:
+### Recorrencia
+
+1. use um curso pequeno de teste
+2. crie uma recorrencia com poucas ocorrencias
+3. confira no curso se os avisos futuros foram criados com agendamento
+4. cancele a recorrencia
+5. confira se os avisos futuros foram removidos do Canvas
+
+### Inativos
 
 1. use um curso pequeno de teste
 2. selecione um criterio
@@ -255,6 +305,7 @@ Observacoes:
 - volume diario
 - cursos mais movimentados
 - grupos mais usados
+- recorrencias ativas
 - falhas recentes
 - historico detalhado por job
 
@@ -324,6 +375,23 @@ Authorization: Bearer <token>
 Content-Type: application/x-www-form-urlencoded
 
 title=Aviso&message=<p>Mensagem</p>&is_announcement=true&published=true
+```
+
+### Criar comunicado agendado
+
+```http
+POST /api/v1/courses/123/discussion_topics
+Authorization: Bearer <token>
+Content-Type: application/x-www-form-urlencoded
+
+title=Encontro semanal&message=<p>Lembrete</p>&is_announcement=true&published=true&delayed_post_at=2030-05-01T22:00:00Z
+```
+
+### Cancelar aviso futuro
+
+```http
+DELETE /api/v1/courses/123/discussion_topics/9999
+Authorization: Bearer <token>
 ```
 
 ### Buscar alunos

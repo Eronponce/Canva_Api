@@ -1,4 +1,4 @@
-const STORAGE_KEY = "canvas-bulk-panel-ui-v4";
+const STORAGE_KEY = "canvas-bulk-panel-ui-v6";
 
 const state = {
   config: null,
@@ -11,6 +11,7 @@ const state = {
   history: [],
   reportAnalytics: null,
   reportDays: 30,
+  recurrences: [],
   connectionSnapshot: null,
   envLoaded: false,
   envContent: "",
@@ -32,6 +33,13 @@ const state = {
     groupIds: [],
     courseRefs: [],
     selectAllGroups: false,
+  },
+  recurrence: {
+    mode: "groups",
+    groupIds: [],
+    courseRefs: [],
+    selectAllGroups: false,
+    preview: null,
   },
   engagement: {
     mode: "groups",
@@ -137,6 +145,13 @@ function bindEvents() {
     renderTargetControls("message");
     persistUiState();
   });
+  $("#recurrenceAllGroups").addEventListener("change", () => {
+    state.recurrence.selectAllGroups = $("#recurrenceAllGroups").checked;
+    state.recurrence.preview = null;
+    renderRecurrencePreview(null);
+    renderTargetControls("recurrence");
+    persistUiState();
+  });
   $("#engagementAllGroups").addEventListener("change", () => {
     state.engagement.selectAllGroups = $("#engagementAllGroups").checked;
     state.engagement.preview = null;
@@ -172,12 +187,29 @@ function bindEvents() {
   $("#messageDryRun").addEventListener("change", persistUiState);
   $("#messageForm").addEventListener("submit", submitMessageJob);
 
+  $("#recurrenceName").addEventListener("input", persistUiState);
+  $("#recurrenceTitle").addEventListener("input", persistUiState);
+  $("#recurrenceMessage").addEventListener("input", persistUiState);
+  $("#recurrenceType").addEventListener("change", persistUiState);
+  $("#recurrenceInterval").addEventListener("input", persistUiState);
+  $("#recurrenceFirstPublishAt").addEventListener("input", persistUiState);
+  $("#recurrenceOccurrences").addEventListener("input", persistUiState);
+  $("#recurrenceLockComment").addEventListener("change", persistUiState);
+  $("#previewRecurrenceBtn").addEventListener("click", previewRecurrence);
+  $("#recurrenceForm").addEventListener("submit", submitRecurrence);
+
   $("#engagementCriteriaMode").addEventListener("change", () => {
     state.engagement.preview = null;
     renderTargetSummary("engagement");
     renderEngagementPreview(null);
     persistUiState();
   });
+  $("#engagementMatchMode").addEventListener("change", persistUiState);
+  $("#engagementInactiveDays").addEventListener("input", persistUiState);
+  $("#engagementMaxActivityMinutes").addEventListener("input", persistUiState);
+  $("#engagementOnlyModules").addEventListener("change", persistUiState);
+  $("#engagementRequireNeverAccessed").addEventListener("change", persistUiState);
+  $("#engagementRequireIncomplete").addEventListener("change", persistUiState);
   $("#engagementSubject").addEventListener("input", persistUiState);
   $("#engagementMessage").addEventListener("input", persistUiState);
   $("#engagementDryRun").addEventListener("change", persistUiState);
@@ -205,6 +237,10 @@ function handleDelegatedClick(event) {
       state.engagement.preview = null;
       renderEngagementPreview(null);
     }
+    if (kind === "recurrence") {
+      state.recurrence.preview = null;
+      renderRecurrencePreview(null);
+    }
     renderModeSwitch(kind);
     renderTargetControls(kind);
     persistUiState();
@@ -221,6 +257,12 @@ function handleDelegatedClick(event) {
   if (openReport) {
     state.selectedReportId = openReport.dataset.jobId;
     renderReportDetail();
+    return;
+  }
+
+  const recurrenceAction = event.target.closest("[data-recurrence-action]");
+  if (recurrenceAction) {
+    handleRecurrenceAction(recurrenceAction.dataset.recurrenceAction, recurrenceAction.dataset.recurrenceId);
   }
 }
 
@@ -276,7 +318,21 @@ function restoreUiState() {
     $("#messageStrategy").value = saved.messageStrategy || "users";
     $("#messageDedupe").checked = saved.messageDedupe !== false;
     $("#messageDryRun").checked = Boolean(saved.messageDryRun);
+    $("#recurrenceName").value = saved.recurrenceName || "";
+    $("#recurrenceTitle").value = saved.recurrenceTitle || "";
+    $("#recurrenceMessage").value = saved.recurrenceMessage || "";
+    $("#recurrenceType").value = saved.recurrenceType || "weekly";
+    $("#recurrenceInterval").value = saved.recurrenceInterval || "1";
+    $("#recurrenceFirstPublishAt").value = saved.recurrenceFirstPublishAt || "";
+    $("#recurrenceOccurrences").value = saved.recurrenceOccurrences || "8";
+    $("#recurrenceLockComment").checked = Boolean(saved.recurrenceLockComment);
     $("#engagementCriteriaMode").value = saved.engagementCriteriaMode || "never_accessed_or_incomplete_resources";
+    $("#engagementMatchMode").value = saved.engagementMatchMode || "or";
+    $("#engagementInactiveDays").value = saved.engagementInactiveDays || "";
+    $("#engagementMaxActivityMinutes").value = saved.engagementMaxActivityMinutes || "";
+    $("#engagementOnlyModules").checked = Boolean(saved.engagementOnlyModules);
+    $("#engagementRequireNeverAccessed").checked = Boolean(saved.engagementRequireNeverAccessed);
+    $("#engagementRequireIncomplete").checked = Boolean(saved.engagementRequireIncomplete);
     $("#engagementSubject").value = saved.engagementSubject || "";
     $("#engagementMessage").value = saved.engagementMessage || "";
     $("#engagementDryRun").checked = Boolean(saved.engagementDryRun);
@@ -286,9 +342,13 @@ function restoreUiState() {
     }
     state.announcement = { ...state.announcement, ...(saved.announcement || {}) };
     state.message = { ...state.message, ...(saved.message || {}) };
+    state.recurrence = { ...state.recurrence, ...(saved.recurrence || {}), preview: null };
     state.engagement = { ...state.engagement, ...(saved.engagement || {}), preview: null };
     if (!["groups", "courses"].includes(state.message.mode)) {
       state.message.mode = "groups";
+    }
+    if (!["groups", "courses"].includes(state.recurrence.mode)) {
+      state.recurrence.mode = "groups";
     }
     if (!["groups", "courses"].includes(state.engagement.mode)) {
       state.engagement.mode = "groups";
@@ -319,7 +379,21 @@ function persistUiState() {
       messageStrategy: $("#messageStrategy").value,
       messageDedupe: $("#messageDedupe").checked,
       messageDryRun: $("#messageDryRun").checked,
+      recurrenceName: $("#recurrenceName").value,
+      recurrenceTitle: $("#recurrenceTitle").value,
+      recurrenceMessage: $("#recurrenceMessage").value,
+      recurrenceType: $("#recurrenceType").value,
+      recurrenceInterval: $("#recurrenceInterval").value,
+      recurrenceFirstPublishAt: $("#recurrenceFirstPublishAt").value,
+      recurrenceOccurrences: $("#recurrenceOccurrences").value,
+      recurrenceLockComment: $("#recurrenceLockComment").checked,
       engagementCriteriaMode: $("#engagementCriteriaMode").value,
+      engagementMatchMode: $("#engagementMatchMode").value,
+      engagementInactiveDays: $("#engagementInactiveDays").value,
+      engagementMaxActivityMinutes: $("#engagementMaxActivityMinutes").value,
+      engagementOnlyModules: $("#engagementOnlyModules").checked,
+      engagementRequireNeverAccessed: $("#engagementRequireNeverAccessed").checked,
+      engagementRequireIncomplete: $("#engagementRequireIncomplete").checked,
       engagementSubject: $("#engagementSubject").value,
       engagementMessage: $("#engagementMessage").value,
       engagementDryRun: $("#engagementDryRun").checked,
@@ -330,6 +404,12 @@ function persistUiState() {
         groupIds: state.message.groupIds,
         courseRefs: state.message.courseRefs,
         selectAllGroups: state.message.selectAllGroups,
+      },
+      recurrence: {
+        mode: state.recurrence.mode,
+        groupIds: state.recurrence.groupIds,
+        courseRefs: state.recurrence.courseRefs,
+        selectAllGroups: state.recurrence.selectAllGroups,
       },
       engagement: {
         mode: state.engagement.mode,
@@ -417,6 +497,7 @@ function ensureTargetSelection(kind) {
   if (payload.group_ids?.length) return true;
   const tabMap = {
     announcement: "announcements",
+    recurrence: "recurrence",
     message: "messages",
     engagement: "engagement",
   };
@@ -506,6 +587,7 @@ async function loadConfig() {
   state.config = data.settings || {};
   state.groups = Array.isArray(data.groups) ? data.groups : [];
   state.registeredCourses = Array.isArray(data.registered_courses) ? data.registered_courses : [];
+  state.recurrences = Array.isArray(data.announcement_recurrences) ? data.announcement_recurrences : [];
   syncCatalogWithRegisteredCourses();
   pruneSelections();
 }
@@ -540,10 +622,12 @@ function pruneSelections() {
   const validGroupIds = new Set(state.groups.map((group) => group.id));
   state.announcement.groupIds = state.announcement.groupIds.filter((id) => validGroupIds.has(id));
   state.message.groupIds = state.message.groupIds.filter((id) => validGroupIds.has(id));
+  state.recurrence.groupIds = state.recurrence.groupIds.filter((id) => validGroupIds.has(id));
   state.engagement.groupIds = state.engagement.groupIds.filter((id) => validGroupIds.has(id));
   const validCourseRefs = new Set(state.registeredCourses.map((item) => item.course_ref));
   state.announcement.courseRefs = state.announcement.courseRefs.filter((ref) => validCourseRefs.has(ref));
   state.message.courseRefs = state.message.courseRefs.filter((ref) => validCourseRefs.has(ref));
+  state.recurrence.courseRefs = state.recurrence.courseRefs.filter((ref) => validCourseRefs.has(ref));
   state.engagement.courseRefs = state.engagement.courseRefs.filter((ref) => validCourseRefs.has(ref));
   const selectableCatalogRefs = new Set(
     state.courseCatalog
@@ -558,12 +642,16 @@ function renderAll() {
   renderRegisteredCourses();
   renderGroups();
   renderModeSwitch("announcement");
+  renderModeSwitch("recurrence");
   renderModeSwitch("message");
   renderModeSwitch("engagement");
   renderTargetControls("announcement");
+  renderTargetControls("recurrence");
   renderTargetControls("message");
   renderTargetControls("engagement");
   renderCatalogCourseSummary();
+  renderRecurrencePreview(state.recurrence.preview);
+  renderRecurrences();
   renderEngagementPreview(state.engagement.preview);
   renderReports();
   renderSettingsInfo(state.config || {});
@@ -841,6 +929,89 @@ function renderGroups() {
   `).join("");
 }
 
+function renderRecurrencePreview(preview) {
+  const summary = $("#recurrencePreviewSummary");
+  const schedule = $("#recurrenceSchedulePreview");
+  if (!summary || !schedule) return;
+  if (!preview) {
+    summary.innerHTML = "";
+    schedule.innerHTML = `<div class="empty-state">Selecione as turmas e clique em prever datas.</div>`;
+    return;
+  }
+  summary.innerHTML = `
+    <div class="summary-card"><span>Turmas</span><strong>${escapeHtml(String(preview.summary?.courses || 0))}</strong></div>
+    <div class="summary-card"><span>Ocorrencias por turma</span><strong>${escapeHtml(String(preview.summary?.occurrences_per_course || 0))}</strong></div>
+    <div class="summary-card"><span>Total de avisos</span><strong>${escapeHtml(String(preview.summary?.total_announcements || 0))}</strong></div>
+    <div class="summary-card"><span>Ultima publicacao</span><strong>${escapeHtml(formatDate(preview.summary?.last_publish_at || ""))}</strong></div>
+  `;
+  schedule.innerHTML = (preview.schedule || []).map((item) => `
+    <div class="history-item">
+      <div class="history-item-header">
+        <div>
+          <strong>Ocorrencia ${escapeHtml(String(item.occurrence_index || "-"))}</strong>
+          <div class="compact-meta">${escapeHtml(formatDate(item.publish_at))}</div>
+        </div>
+        <div class="history-actions"><span class="chip">${escapeHtml(preview.summary?.recurrence_type || "-")}</span></div>
+      </div>
+    </div>
+  `).join("");
+}
+
+function renderRecurrences() {
+  const container = $("#recurrenceList");
+  if (!container) return;
+  if (!state.recurrences.length) {
+    container.innerHTML = `<div class="empty-state">Nenhuma recorrencia criada.</div>`;
+    return;
+  }
+  container.innerHTML = state.recurrences.map((item) => `
+    <div class="group-card">
+      <div class="group-card-header">
+        <div>
+          <strong>${escapeHtml(item.name || item.title || "Recorrencia")}</strong>
+          <div class="compact-meta">${escapeHtml(item.title || "-")} | ${escapeHtml(item.recurrence_type || "-")} a cada ${escapeHtml(String(item.interval_value || 1))}</div>
+        </div>
+        <div class="group-card-actions">
+          <button class="mini-btn" type="button" data-recurrence-action="reuse" data-recurrence-id="${escapeHtml(item.id)}">Usar como base</button>
+          <button class="mini-btn danger" type="button" data-recurrence-action="cancel" data-recurrence-id="${escapeHtml(item.id)}">${item.is_active ? "Cancelar futuros" : "Tentar cancelar"}</button>
+        </div>
+      </div>
+      <div class="summary-grid">
+        <div class="summary-card"><span>Total</span><strong>${escapeHtml(String(item.total_items || 0))}</strong></div>
+        <div class="summary-card"><span>Futuros</span><strong>${escapeHtml(String(item.future_items || 0))}</strong></div>
+        <div class="summary-card"><span>Cancelados</span><strong>${escapeHtml(String(item.canceled_items || 0))}</strong></div>
+        <div class="summary-card"><span>Proximo</span><strong>${escapeHtml(formatDate(item.next_publish_at || ""))}</strong></div>
+      </div>
+      ${item.cancel_reason ? `<div class="compact-meta">Cancelamento: ${escapeHtml(item.cancel_reason)}</div>` : ""}
+      ${item.last_error ? `<div class="compact-meta text-danger">${escapeHtml(item.last_error)}</div>` : ""}
+      <div class="chips">
+        ${(item.items || []).slice(0, 6).map((row) => `<span class="chip">${escapeHtml(row.course_name || row.course_ref)} | ${escapeHtml(formatDate(row.scheduled_for || ""))} | ${escapeHtml(row.status || "-")}</span>`).join("")}
+      </div>
+    </div>
+  `).join("");
+}
+
+function applyRecurrenceToForm(item) {
+  openTab("recurrence");
+  $("#recurrenceName").value = item.name || "";
+  $("#recurrenceTitle").value = item.title || "";
+  $("#recurrenceMessage").value = item.message_html || "";
+  $("#recurrenceType").value = item.recurrence_type || "weekly";
+  $("#recurrenceInterval").value = String(item.interval_value || 1);
+  $("#recurrenceOccurrences").value = String(item.occurrence_count || 1);
+  $("#recurrenceLockComment").checked = Boolean(item.lock_comment);
+  $("#recurrenceFirstPublishAt").value = formatLocalDateTimeInput(item.first_publish_at);
+  state.recurrence.mode = item.target_mode === "courses" ? "courses" : "groups";
+  state.recurrence.groupIds = [...((item.target_config_json || {}).group_ids || [])];
+  state.recurrence.courseRefs = [...((item.target_config_json || {}).course_refs || [])];
+  state.recurrence.selectAllGroups = Boolean((item.target_config_json || {}).select_all_groups);
+  state.recurrence.preview = null;
+  renderTargetControls("recurrence");
+  renderRecurrencePreview(null);
+  persistUiState();
+  showNotice(`Recorrencia "${item.name || item.title}" carregada no formulario.`, "success");
+}
+
 async function handleGroupClick(event) {
   const button = event.target.closest("[data-group-id]");
   if (!button) return;
@@ -919,6 +1090,42 @@ async function saveGroup() {
   }
 }
 
+async function handleRecurrenceAction(action, recurrenceId) {
+  const recurrence = state.recurrences.find((item) => item.id === recurrenceId);
+  if (!recurrence) {
+    showNotice("Recorrencia nao encontrada.", "error");
+    return;
+  }
+  if (action === "reuse") {
+    applyRecurrenceToForm(recurrence);
+    return;
+  }
+  if (action !== "cancel") {
+    return;
+  }
+  if (!ensureConnectionConfigured()) return;
+  const button = document.querySelector(`[data-recurrence-action="cancel"][data-recurrence-id="${CSS.escape(recurrenceId)}"]`);
+  setBusy(button, true, "Cancelando...");
+  hideNotice();
+  try {
+    const cancelReason = window.prompt("Motivo do cancelamento dos avisos futuros:", recurrence.cancel_reason || "Mudanca de agenda") || "";
+    const response = await apiFetch(`/api/announcement-recurrences/${recurrenceId}/cancel`, {
+      method: "POST",
+      body: {
+        ...getConnectionPayload(),
+        cancel_reason: cancelReason.trim(),
+      },
+    });
+    await loadConfig();
+    renderAll();
+    showNotice(`Recorrencia cancelada. ${response.canceled_count || 0} aviso(s) futuro(s) removido(s) do Canvas.`, response.failure_count ? "info" : "success");
+  } catch (error) {
+    showNotice(error.message, "error");
+  } finally {
+    setBusy(button, false);
+  }
+}
+
 function renderModeSwitch(kind) {
   document.querySelectorAll(`.mode-button[data-kind='${kind}']`).forEach((button) => {
     button.classList.toggle("active", button.dataset.mode === state[kind].mode);
@@ -955,6 +1162,12 @@ function renderPickers(options = {}) {
   });
   renderPicker("announcementCoursePicker", coursePickerItems(), state.announcement.courseRefs, {
     preserveScroll: options.preservePickerId === "announcementCoursePicker",
+  });
+  renderPicker("recurrenceGroupPicker", groupPickerItems(), state.recurrence.groupIds, {
+    preserveScroll: options.preservePickerId === "recurrenceGroupPicker",
+  });
+  renderPicker("recurrenceCoursePicker", coursePickerItems(), state.recurrence.courseRefs, {
+    preserveScroll: options.preservePickerId === "recurrenceCoursePicker",
   });
   renderPicker("messageGroupPicker", groupPickerItems(), state.message.groupIds, {
     preserveScroll: options.preservePickerId === "messageGroupPicker",
@@ -1017,6 +1230,8 @@ function rerenderPickerById(pickerId, options = {}) {
     courseCatalogPicker: () => renderPicker("courseCatalogPicker", catalogCoursePickerItems(), state.courseCatalogSelection, options),
     announcementGroupPicker: () => renderPicker("announcementGroupPicker", groupPickerItems(), state.announcement.groupIds, options),
     announcementCoursePicker: () => renderPicker("announcementCoursePicker", coursePickerItems(), state.announcement.courseRefs, options),
+    recurrenceGroupPicker: () => renderPicker("recurrenceGroupPicker", groupPickerItems(), state.recurrence.groupIds, options),
+    recurrenceCoursePicker: () => renderPicker("recurrenceCoursePicker", coursePickerItems(), state.recurrence.courseRefs, options),
     messageGroupPicker: () => renderPicker("messageGroupPicker", groupPickerItems(), state.message.groupIds, options),
     messageCoursePicker: () => renderPicker("messageCoursePicker", coursePickerItems(), state.message.courseRefs, options),
     engagementGroupPicker: () => renderPicker("engagementGroupPicker", groupPickerItems(), state.engagement.groupIds, options),
@@ -1124,6 +1339,22 @@ function pickerTarget(pickerId) {
         state.announcement.courseRefs = next;
       },
     },
+    recurrenceGroupPicker: {
+      kind: "recurrence",
+      values: state.recurrence.groupIds,
+      set(next) {
+        state.recurrence.groupIds = next;
+        state.recurrence.preview = null;
+      },
+    },
+    recurrenceCoursePicker: {
+      kind: "recurrence",
+      values: state.recurrence.courseRefs,
+      set(next) {
+        state.recurrence.courseRefs = next;
+        state.recurrence.preview = null;
+      },
+    },
     messageGroupPicker: {
       kind: "message",
       values: state.message.groupIds,
@@ -1163,6 +1394,8 @@ function selectedValues(pickerId) {
   if (pickerId === "courseCatalogPicker") return state.courseCatalogSelection;
   if (pickerId === "announcementGroupPicker") return state.announcement.groupIds;
   if (pickerId === "announcementCoursePicker") return state.announcement.courseRefs;
+  if (pickerId === "recurrenceGroupPicker") return state.recurrence.groupIds;
+  if (pickerId === "recurrenceCoursePicker") return state.recurrence.courseRefs;
   if (pickerId === "messageGroupPicker") return state.message.groupIds;
   if (pickerId === "messageCoursePicker") return state.message.courseRefs;
   if (pickerId === "engagementGroupPicker") return state.engagement.groupIds;
@@ -1213,6 +1446,18 @@ function renderTargetSummary(kind) {
     courses: "Cursos especificos",
   };
   const uniqueCourseRefs = unique(courses.map((course) => course.course_ref));
+  if (kind === "recurrence") {
+    const previewSummary = state.recurrence.preview?.summary || null;
+    summaryEl.innerHTML = `
+      <div class="summary-card"><span>Modo</span><strong>${modeLabelMap[target.mode] || "-"}</strong></div>
+      <div class="summary-card"><span>Grupos</span><strong>${target.mode === "groups" ? (target.selectAllGroups ? "Todos" : String(selectedGroups(kind).length)) : "-"}</strong></div>
+      <div class="summary-card"><span>Turmas selecionadas</span><strong>${escapeHtml(String(uniqueCourseRefs.length))}</strong></div>
+      <div class="summary-card"><span>Ocorrencias por turma</span><strong>${escapeHtml(String(previewSummary?.occurrences_per_course || 0))}</strong></div>
+      <div class="summary-card"><span>Total de avisos</span><strong>${escapeHtml(String(previewSummary?.total_announcements || 0))}</strong></div>
+      <div class="summary-card"><span>Ultima data</span><strong>${escapeHtml(formatDate(previewSummary?.last_publish_at || ""))}</strong></div>
+    `;
+    return;
+  }
   if (kind === "engagement") {
     const previewSummary = state.engagement.preview?.summary || null;
     summaryEl.innerHTML = `
@@ -1294,6 +1539,8 @@ function renderEngagementPreview(data) {
       <div class="summary-card"><span>Alunos que receberao</span><strong>${escapeHtml(String(summary.total_matched_students || 0))}</strong></div>
       <div class="summary-card"><span>Sem acesso nenhum</span><strong>${escapeHtml(String(summary.total_never_accessed_matches || 0))}</strong></div>
       <div class="summary-card"><span>Recursos pendentes</span><strong>${escapeHtml(String(summary.total_incomplete_resources_matches || 0))}</strong></div>
+      <div class="summary-card"><span>Sem atividade</span><strong>${escapeHtml(String(summary.total_inactive_days_matches || 0))}</strong></div>
+      <div class="summary-card"><span>Baixa atividade</span><strong>${escapeHtml(String(summary.total_low_activity_matches || 0))}</strong></div>
       <div class="summary-card"><span>Criterio</span><strong>${escapeHtml(formatEngagementCriteria(summary.criteria_mode || $("#engagementCriteriaMode").value))}</strong></div>
     </div>
     ${notices.length ? `<div class="chips">${notices.map((item) => `<span class="chip dim">${escapeHtml(item)}</span>`).join("")}</div>` : ""}
@@ -1309,8 +1556,10 @@ function engagementCourseColumns() {
     { label: "Alvo", format: (row) => escapeHtml(String(row.matched_students || 0)) },
     { label: "Sem acesso", format: (row) => escapeHtml(String(row.never_accessed_matches || 0)) },
     { label: "Pendentes", format: (row) => escapeHtml(String(row.incomplete_resources_matches || 0)) },
+    { label: "Sem atividade", format: (row) => escapeHtml(String(row.inactive_days_matches || 0)) },
+    { label: "Baixa atividade", format: (row) => escapeHtml(String(row.low_activity_matches || 0)) },
     { label: "Modulo", format: (row) => row.has_module_requirements ? "Sim" : "Nao" },
-    { label: "Status API", format: (row) => `${row.analytics_available ? "Analytics ok" : "Analytics indisponivel"}<div class="subtle">${row.progress_available ? "Progress ok" : "Progress indisponivel"}</div>` },
+    { label: "Status API", format: (row) => `${row.analytics_available ? "Analytics ok" : "Analytics indisponivel"}<div class="subtle">${row.progress_available ? "Progress ok" : "Progress indisponivel"} | ${row.enrollment_activity_available ? "Enrollments ok" : "Enrollments indisponivel"}</div>` },
   ];
 }
 
@@ -1319,9 +1568,150 @@ function engagementPreviewColumns() {
     { label: "Turma", format: (row) => `${escapeHtml(row.course_name || "-")}<div class="subtle mono">${escapeHtml(String(row.course_ref || row.course_id || "-"))}</div>` },
     { label: "Aluno", format: (row) => `${escapeHtml(row.student_name || "-")}<div class="subtle mono">${escapeHtml(String(row.user_id || "-"))}</div>` },
     { label: "Acessos", format: (row) => `${escapeHtml(String(row.page_views || 0))} visualizacoes<div class="subtle">${escapeHtml(String(row.participations || 0))} participacoes</div>` },
+    { label: "Atividade", format: (row) => `${escapeHtml(formatDateTime(row.last_activity_at))}<div class="subtle">${escapeHtml(String(Math.round((row.total_activity_time_seconds || 0) / 60)))} min</div>` },
     { label: "Recursos", format: (row) => `${escapeHtml(String(row.requirement_completed_count || 0))}/${escapeHtml(String(row.requirement_count || 0))}` },
     { label: "Motivo", format: (row) => escapeHtml(row.reasons_label || "-") },
   ];
+}
+
+function collectEngagementCriteriaConfig() {
+  return {
+    match_mode: $("#engagementMatchMode").value,
+    inactive_days: $("#engagementInactiveDays").value ? Number($("#engagementInactiveDays").value) : null,
+    max_total_activity_minutes: $("#engagementMaxActivityMinutes").value ? Number($("#engagementMaxActivityMinutes").value) : null,
+    only_with_module_requirements: $("#engagementOnlyModules").checked,
+    require_never_accessed: $("#engagementRequireNeverAccessed").checked,
+    require_incomplete_resources: $("#engagementRequireIncomplete").checked,
+  };
+}
+
+function buildMessageRequestBody() {
+  return {
+    ...getConnectionPayload(),
+    ...getTargetPayload("message"),
+    subject: $("#messageSubject").value.trim(),
+    message: $("#messageBody").value.trim(),
+    strategy: $("#messageStrategy").value,
+    dedupe: $("#messageDedupe").checked,
+    dry_run: $("#messageDryRun").checked,
+  };
+}
+
+function buildEngagementRequestBody() {
+  return {
+    ...getConnectionPayload(),
+    ...getTargetPayload("engagement"),
+    criteria_mode: $("#engagementCriteriaMode").value,
+    criteria_config: collectEngagementCriteriaConfig(),
+    subject: $("#engagementSubject").value.trim(),
+    message: $("#engagementMessage").value.trim(),
+    dry_run: $("#engagementDryRun").checked,
+  };
+}
+
+function validateMessageForm() {
+  if (!ensureConnectionConfigured() || !ensureTargetSelection("message")) return false;
+  if (!$("#messageSubject").value.trim()) {
+    markInvalid("#messageSubject");
+    focusField("#messageSubject");
+    showNotice("Informe o assunto da mensagem.", "error");
+    return false;
+  }
+  if (!$("#messageBody").value.trim()) {
+    markInvalid("#messageBody");
+    focusField("#messageBody");
+    showNotice("Informe o corpo da mensagem.", "error");
+    return false;
+  }
+  return true;
+}
+
+function validateEngagementForm() {
+  if (!ensureConnectionConfigured() || !ensureTargetSelection("engagement")) return false;
+  if (!state.engagement.preview) {
+    showNotice("Busque primeiro a quantidade de alunos por turma antes de enviar a mensagem para inativos.", "error");
+    openTab("engagement");
+    focusField("#previewEngagementBtn");
+    return false;
+  }
+  if (!$("#engagementSubject").value.trim()) {
+    markInvalid("#engagementSubject");
+    focusField("#engagementSubject");
+    showNotice("Informe o assunto da mensagem para inativos.", "error");
+    return false;
+  }
+  if (!$("#engagementMessage").value.trim()) {
+    markInvalid("#engagementMessage");
+    focusField("#engagementMessage");
+    showNotice("Informe a mensagem para os alunos inativos.", "error");
+    return false;
+  }
+  return true;
+}
+
+function validateRecurrenceForm() {
+  if (!ensureConnectionConfigured() || !ensureTargetSelection("recurrence")) return false;
+  if (!$("#recurrenceTitle").value.trim()) {
+    markInvalid("#recurrenceTitle");
+    focusField("#recurrenceTitle");
+    showNotice("Informe o titulo da recorrencia de avisos.", "error");
+    return false;
+  }
+  if (!$("#recurrenceMessage").value.trim()) {
+    markInvalid("#recurrenceMessage");
+    focusField("#recurrenceMessage");
+    showNotice("Informe a mensagem HTML da recorrencia.", "error");
+    return false;
+  }
+  if (!$("#recurrenceFirstPublishAt").value) {
+    markInvalid("#recurrenceFirstPublishAt");
+    focusField("#recurrenceFirstPublishAt");
+    showNotice("Informe a primeira publicacao da recorrencia.", "error");
+    return false;
+  }
+  return true;
+}
+
+function buildRecurrenceRequestBody() {
+  return {
+    ...getConnectionPayload(),
+    ...getTargetPayload("recurrence"),
+    target_mode: state.recurrence.mode,
+    name: $("#recurrenceName").value.trim(),
+    title: $("#recurrenceTitle").value.trim(),
+    message_html: $("#recurrenceMessage").value.trim(),
+    recurrence_type: $("#recurrenceType").value,
+    interval_value: Number($("#recurrenceInterval").value || 1),
+    first_publish_at_local: $("#recurrenceFirstPublishAt").value,
+    occurrence_count: Number($("#recurrenceOccurrences").value || 1),
+    client_timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
+    lock_comment: $("#recurrenceLockComment").checked,
+  };
+}
+
+async function previewRecurrence() {
+  const button = $("#previewRecurrenceBtn");
+  setBusy(button, true, "Calculando...");
+  hideNotice();
+  clearFieldValidation();
+  try {
+    if (!validateRecurrenceForm()) return;
+    const response = await apiFetch("/api/announcement-recurrences/preview", {
+      method: "POST",
+      body: buildRecurrenceRequestBody(),
+    });
+    state.recurrence.preview = response;
+    renderTargetSummary("recurrence");
+    renderRecurrencePreview(response);
+    showNotice("Previsao da recorrencia carregada.", "success");
+  } catch (error) {
+    state.recurrence.preview = null;
+    renderTargetSummary("recurrence");
+    renderRecurrencePreview(null);
+    showNotice(error.message, "error");
+  } finally {
+    setBusy(button, false);
+  }
 }
 
 async function previewEngagementTargets() {
@@ -1337,6 +1727,7 @@ async function previewEngagementTargets() {
         ...getConnectionPayload(),
         ...getTargetPayload("engagement"),
         criteria_mode: $("#engagementCriteriaMode").value,
+        criteria_config: collectEngagementCriteriaConfig(),
       },
     });
     state.engagement.preview = response;
@@ -1418,30 +1809,10 @@ async function submitMessageJob(event) {
   hideNotice();
   clearFieldValidation();
   try {
-    if (!ensureConnectionConfigured() || !ensureTargetSelection("message")) return;
-    if (!$("#messageSubject").value.trim()) {
-      markInvalid("#messageSubject");
-      focusField("#messageSubject");
-      showNotice("Informe o assunto da mensagem.", "error");
-      return;
-    }
-    if (!$("#messageBody").value.trim()) {
-      markInvalid("#messageBody");
-      focusField("#messageBody");
-      showNotice("Informe o corpo da mensagem.", "error");
-      return;
-    }
+    if (!validateMessageForm()) return;
     const response = await apiFetch("/api/messages/jobs", {
       method: "POST",
-      body: {
-        ...getConnectionPayload(),
-        ...getTargetPayload("message"),
-        subject: $("#messageSubject").value.trim(),
-        message: $("#messageBody").value.trim(),
-        strategy: $("#messageStrategy").value,
-        dedupe: $("#messageDedupe").checked,
-        dry_run: $("#messageDryRun").checked,
-      },
+      body: buildMessageRequestBody(),
     });
     renderMessageJob(response.job);
     startPolling(response.job.id, "message");
@@ -1460,39 +1831,37 @@ async function submitEngagementJob(event) {
   hideNotice();
   clearFieldValidation();
   try {
-    if (!ensureConnectionConfigured() || !ensureTargetSelection("engagement")) return;
-    if (!state.engagement.preview) {
-      showNotice("Busque primeiro a quantidade de alunos por turma antes de enviar a mensagem para inativos.", "error");
-      openTab("engagement");
-      focusField("#previewEngagementBtn");
-      return;
-    }
-    if (!$("#engagementSubject").value.trim()) {
-      markInvalid("#engagementSubject");
-      focusField("#engagementSubject");
-      showNotice("Informe o assunto da mensagem para inativos.", "error");
-      return;
-    }
-    if (!$("#engagementMessage").value.trim()) {
-      markInvalid("#engagementMessage");
-      focusField("#engagementMessage");
-      showNotice("Informe a mensagem para os alunos inativos.", "error");
-      return;
-    }
+    if (!validateEngagementForm()) return;
     const response = await apiFetch("/api/engagement/jobs", {
       method: "POST",
-      body: {
-        ...getConnectionPayload(),
-        ...getTargetPayload("engagement"),
-        criteria_mode: $("#engagementCriteriaMode").value,
-        subject: $("#engagementSubject").value.trim(),
-        message: $("#engagementMessage").value.trim(),
-        dry_run: $("#engagementDryRun").checked,
-      },
+      body: buildEngagementRequestBody(),
     });
     renderEngagementJob(response.job);
     startPolling(response.job.id, "engagement");
     showNotice("Lote de mensagens para alunos inativos enfileirado.", "success");
+  } catch (error) {
+    showNotice(error.message, "error");
+  } finally {
+    setBusy(button, false);
+  }
+}
+
+async function submitRecurrence(event) {
+  event.preventDefault();
+  const button = $("#recurrenceForm button[type='submit']");
+  setBusy(button, true, "Criando...");
+  hideNotice();
+  clearFieldValidation();
+  try {
+    if (!validateRecurrenceForm()) return;
+    const response = await apiFetch("/api/announcement-recurrences", {
+      method: "POST",
+      body: buildRecurrenceRequestBody(),
+    });
+    state.recurrence.preview = null;
+    await loadConfig();
+    renderAll();
+    showNotice(`Recorrencia criada com ${response.created_count || 0} aviso(s) agendado(s) no Canvas.`, response.failure_count ? "info" : "success");
   } catch (error) {
     showNotice(error.message, "error");
   } finally {
@@ -1510,7 +1879,10 @@ function startPolling(jobId, kind) {
       if (kind === "engagement") renderEngagementJob(job);
       if (["completed", "failed"].includes(job.status)) {
         stopPolling(kind);
+        await loadConfig();
         await loadHistory();
+        await loadAnalytics();
+        renderAll();
         renderReports();
       }
     } catch (error) {
@@ -1559,6 +1931,7 @@ function renderEngagementJob(job) {
     { label: "Alvo", format: (row) => escapeHtml(String(row.recipients_targeted || 0)) },
     { label: "Sem acesso", format: (row) => escapeHtml(String(row.never_accessed_matches || 0)) },
     { label: "Pendentes", format: (row) => escapeHtml(String(row.incomplete_resources_matches || 0)) },
+    { label: "Sem atividade", format: (row) => escapeHtml(String(row.inactive_days_matches || 0)) },
     { label: "Enviados", format: (row) => escapeHtml(String(row.recipients_sent || 0)) },
     { label: "Status", format: (row) => statusChip(row.status) },
     { label: "Erro", format: (row) => escapeHtml(row.error || "-") },
@@ -1598,6 +1971,7 @@ function renderReportMetrics() {
     metricCard("Mensagens enviadas", overview.total_recipients_sent || 0),
     metricCard("Comunicados criados", overview.total_announcements_created || 0),
     metricCard("Inativos", overview.total_engagement_jobs || 0),
+    metricCard("Recorrencias ativas", overview.active_recurrences || 0),
   ].join("");
 }
 
@@ -1672,6 +2046,7 @@ function reportColumns(kind) {
       { label: "Alvo", format: (row) => escapeHtml(String(row.recipients_targeted || 0)) },
       { label: "Sem acesso", format: (row) => escapeHtml(String(row.never_accessed_matches || 0)) },
       { label: "Pendentes", format: (row) => escapeHtml(String(row.incomplete_resources_matches || 0)) },
+      { label: "Sem atividade", format: (row) => escapeHtml(String(row.inactive_days_matches || 0)) },
       { label: "Enviados", format: (row) => escapeHtml(String(row.recipients_sent || 0)) },
       { label: "Status", format: (row) => statusChip(row.status) },
       { label: "Erro", format: (row) => escapeHtml(row.error || "-") },
@@ -1730,6 +2105,22 @@ function reportAnalyticsColumns(sectionKey) {
     return [
       { label: "Grupo", format: (row) => `${escapeHtml(row.group_name || "-")}<div class="subtle mono">${escapeHtml(String(row.group_id || "-"))}</div>` },
       { label: "Execucoes", format: (row) => escapeHtml(String(row.jobs || 0)) },
+    ];
+  }
+  if (sectionKey === "active_recurrences") {
+    return [
+      { label: "Recorrencia", format: (row) => `${escapeHtml(row.name || "-")}<div class="subtle mono">${escapeHtml(String(row.recurrence_id || "-"))}</div>` },
+      { label: "Avisos", format: (row) => escapeHtml(String(row.total_items || 0)) },
+      { label: "Futuros", format: (row) => escapeHtml(String(row.future_items || 0)) },
+      { label: "Cancelados", format: (row) => escapeHtml(String(row.canceled_items || 0)) },
+    ];
+  }
+  if (sectionKey === "upcoming_recurrences") {
+    return [
+      { label: "Recorrencia", format: (row) => `${escapeHtml(row.name || "-")}<div class="subtle">${escapeHtml(row.title || "-")}</div>` },
+      { label: "Primeira", format: (row) => escapeHtml(formatDateTime(row.first_publish_at)) },
+      { label: "Ocorrencias", format: (row) => escapeHtml(String(row.occurrence_count || 0)) },
+      { label: "Futuros", format: (row) => escapeHtml(String(row.future_items || 0)) },
     ];
   }
   if (sectionKey === "recent_failures") {
@@ -1913,6 +2304,8 @@ async function wipeDatabase() {
     state.history = [];
     state.groups = [];
     state.registeredCourses = [];
+    state.recurrences = [];
+    state.recurrence.preview = null;
     state.reportAnalytics = null;
     state.engagement.preview = null;
     $("#wipeDatabaseConfirm").value = "";
@@ -1962,6 +2355,22 @@ function formatDate(value) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   return date.toLocaleString("pt-BR");
+}
+
+function formatDateTime(value) {
+  return formatDate(value);
+}
+
+function formatLocalDateTimeInput(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+  return `${year}-${month}-${day}T${hours}:${minutes}`;
 }
 
 function formatEnvTokenSource(value) {
