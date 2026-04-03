@@ -6,6 +6,8 @@ const state = {
   registeredCourses: [],
   courseCatalog: [],
   courseCatalogSelection: [],
+  courseCatalogLoaded: false,
+  courseCatalogLoading: false,
   history: [],
   reportAnalytics: null,
   reportDays: 30,
@@ -30,6 +32,13 @@ const state = {
     groupIds: [],
     courseRefs: [],
     selectAllGroups: false,
+  },
+  engagement: {
+    mode: "groups",
+    groupIds: [],
+    courseRefs: [],
+    selectAllGroups: false,
+    preview: null,
   },
   pollers: new Map(),
 };
@@ -56,6 +65,9 @@ function bindTabs() {
 function bindEvents() {
   $("#baseUrl").addEventListener("input", () => {
     state.connectionSnapshot = null;
+    state.courseCatalog = [];
+    state.courseCatalogSelection = [];
+    state.courseCatalogLoaded = false;
     renderConnectionResult(null);
     persistUiState();
   });
@@ -63,7 +75,22 @@ function bindEvents() {
     $("#baseUrl").value = normalizeBaseUrlInput($("#baseUrl").value);
     persistUiState();
   });
-  $("#tokenType").addEventListener("change", persistUiState);
+  $("#apiToken").addEventListener("input", () => {
+    state.connectionSnapshot = null;
+    state.courseCatalog = [];
+    state.courseCatalogSelection = [];
+    state.courseCatalogLoaded = false;
+    renderConnectionResult(null);
+    persistUiState();
+  });
+  $("#tokenType").addEventListener("change", () => {
+    state.connectionSnapshot = null;
+    state.courseCatalog = [];
+    state.courseCatalogSelection = [];
+    state.courseCatalogLoaded = false;
+    renderConnectionResult(null);
+    persistUiState();
+  });
   $("#testConnectionBtn").addEventListener("click", testConnection);
 
   $("#registeredCourseInput").addEventListener("keydown", (event) => {
@@ -110,6 +137,13 @@ function bindEvents() {
     renderTargetControls("message");
     persistUiState();
   });
+  $("#engagementAllGroups").addEventListener("change", () => {
+    state.engagement.selectAllGroups = $("#engagementAllGroups").checked;
+    state.engagement.preview = null;
+    renderEngagementPreview(null);
+    renderTargetControls("engagement");
+    persistUiState();
+  });
 
   document.addEventListener("click", handleDelegatedClick);
   document.addEventListener("input", handleDelegatedInput);
@@ -138,6 +172,18 @@ function bindEvents() {
   $("#messageDryRun").addEventListener("change", persistUiState);
   $("#messageForm").addEventListener("submit", submitMessageJob);
 
+  $("#engagementCriteriaMode").addEventListener("change", () => {
+    state.engagement.preview = null;
+    renderTargetSummary("engagement");
+    renderEngagementPreview(null);
+    persistUiState();
+  });
+  $("#engagementSubject").addEventListener("input", persistUiState);
+  $("#engagementMessage").addEventListener("input", persistUiState);
+  $("#engagementDryRun").addEventListener("change", persistUiState);
+  $("#previewEngagementBtn").addEventListener("click", previewEngagementTargets);
+  $("#engagementForm").addEventListener("submit", submitEngagementJob);
+
   $("#refreshHistoryBtn").addEventListener("click", refreshReports);
   $("#refreshAnalyticsBtn").addEventListener("click", refreshReports);
   $("#reportDaysSelect").addEventListener("change", async () => {
@@ -155,6 +201,10 @@ function handleDelegatedClick(event) {
   if (modeButton) {
     const kind = modeButton.dataset.kind;
     state[kind].mode = modeButton.dataset.mode;
+    if (kind === "engagement") {
+      state.engagement.preview = null;
+      renderEngagementPreview(null);
+    }
     renderModeSwitch(kind);
     renderTargetControls(kind);
     persistUiState();
@@ -226,14 +276,22 @@ function restoreUiState() {
     $("#messageStrategy").value = saved.messageStrategy || "users";
     $("#messageDedupe").checked = saved.messageDedupe !== false;
     $("#messageDryRun").checked = Boolean(saved.messageDryRun);
+    $("#engagementCriteriaMode").value = saved.engagementCriteriaMode || "never_accessed_or_incomplete_resources";
+    $("#engagementSubject").value = saved.engagementSubject || "";
+    $("#engagementMessage").value = saved.engagementMessage || "";
+    $("#engagementDryRun").checked = Boolean(saved.engagementDryRun);
     state.reportDays = Number(saved.reportDays || 30);
     if ($("#reportDaysSelect")) {
       $("#reportDaysSelect").value = String(state.reportDays);
     }
     state.announcement = { ...state.announcement, ...(saved.announcement || {}) };
     state.message = { ...state.message, ...(saved.message || {}) };
+    state.engagement = { ...state.engagement, ...(saved.engagement || {}), preview: null };
     if (!["groups", "courses"].includes(state.message.mode)) {
       state.message.mode = "groups";
+    }
+    if (!["groups", "courses"].includes(state.engagement.mode)) {
+      state.engagement.mode = "groups";
     }
     if (saved.activeTab) {
       openTab(saved.activeTab);
@@ -261,6 +319,10 @@ function persistUiState() {
       messageStrategy: $("#messageStrategy").value,
       messageDedupe: $("#messageDedupe").checked,
       messageDryRun: $("#messageDryRun").checked,
+      engagementCriteriaMode: $("#engagementCriteriaMode").value,
+      engagementSubject: $("#engagementSubject").value,
+      engagementMessage: $("#engagementMessage").value,
+      engagementDryRun: $("#engagementDryRun").checked,
       reportDays: state.reportDays,
       announcement: state.announcement,
       message: {
@@ -268,6 +330,12 @@ function persistUiState() {
         groupIds: state.message.groupIds,
         courseRefs: state.message.courseRefs,
         selectAllGroups: state.message.selectAllGroups,
+      },
+      engagement: {
+        mode: state.engagement.mode,
+        groupIds: state.engagement.groupIds,
+        courseRefs: state.engagement.courseRefs,
+        selectAllGroups: state.engagement.selectAllGroups,
       },
     }),
   );
@@ -284,6 +352,9 @@ function openTab(tabName) {
     hideEnvFile();
   }
   persistUiState();
+  if (tabName === "organization") {
+    maybeAutoLoadCourseCatalog();
+  }
 }
 
 function normalizeBaseUrlInput(value) {
@@ -344,7 +415,12 @@ function ensureTargetSelection(kind) {
   if (payload.course_refs?.length) return true;
   if (payload.select_all_groups) return state.groups.length > 0;
   if (payload.group_ids?.length) return true;
-  openTab(kind === "announcement" ? "announcements" : "messages");
+  const tabMap = {
+    announcement: "announcements",
+    message: "messages",
+    engagement: "engagement",
+  };
+  openTab(tabMap[kind] || "organization");
   showNotice("Selecione grupos ou cursos antes de enviar.", "error");
   return false;
 }
@@ -420,6 +496,9 @@ async function loadInitialData() {
   await loadAnalytics();
   renderConnectionResult(null);
   renderAll();
+  if (document.querySelector(".tab-button.active")?.dataset.tab === "organization") {
+    await maybeAutoLoadCourseCatalog();
+  }
 }
 
 async function loadConfig() {
@@ -461,9 +540,11 @@ function pruneSelections() {
   const validGroupIds = new Set(state.groups.map((group) => group.id));
   state.announcement.groupIds = state.announcement.groupIds.filter((id) => validGroupIds.has(id));
   state.message.groupIds = state.message.groupIds.filter((id) => validGroupIds.has(id));
+  state.engagement.groupIds = state.engagement.groupIds.filter((id) => validGroupIds.has(id));
   const validCourseRefs = new Set(state.registeredCourses.map((item) => item.course_ref));
   state.announcement.courseRefs = state.announcement.courseRefs.filter((ref) => validCourseRefs.has(ref));
   state.message.courseRefs = state.message.courseRefs.filter((ref) => validCourseRefs.has(ref));
+  state.engagement.courseRefs = state.engagement.courseRefs.filter((ref) => validCourseRefs.has(ref));
   const selectableCatalogRefs = new Set(
     state.courseCatalog
       .filter((item) => !item.already_registered)
@@ -478,9 +559,12 @@ function renderAll() {
   renderGroups();
   renderModeSwitch("announcement");
   renderModeSwitch("message");
+  renderModeSwitch("engagement");
   renderTargetControls("announcement");
   renderTargetControls("message");
+  renderTargetControls("engagement");
   renderCatalogCourseSummary();
+  renderEngagementPreview(state.engagement.preview);
   renderReports();
   renderSettingsInfo(state.config || {});
   renderEnvEditorState();
@@ -536,6 +620,9 @@ async function testConnection() {
     state.connectionSnapshot = data;
     renderConnectionResult(data);
     showNotice("Conexao validada com sucesso.", "success");
+    if (document.querySelector(".tab-button.active")?.dataset.tab === "organization") {
+      await maybeAutoLoadCourseCatalog({ force: true });
+    }
   } catch (error) {
     renderConnectionResult(null);
     showNotice(error.message, "error");
@@ -613,12 +700,25 @@ async function addRegisteredCourse() {
 }
 
 async function loadCourseCatalog() {
+  return loadCourseCatalogInternal({ silent: false, force: true });
+}
+
+async function loadCourseCatalogInternal(options = {}) {
   const button = $("#loadCourseCatalogBtn");
-  setBusy(button, true, "Buscando...");
-  hideNotice();
-  clearFieldValidation();
+  const silent = Boolean(options.silent);
+  const force = Boolean(options.force);
+  if (state.courseCatalogLoading) return;
+  if (!force && state.courseCatalogLoaded) return;
+  state.courseCatalogLoading = true;
+  if (button && !silent) {
+    setBusy(button, true, "Buscando...");
+  }
+  if (!silent) {
+    hideNotice();
+    clearFieldValidation();
+  }
   try {
-    if (!ensureConnectionConfigured()) return;
+    if (!hasUsableConnection()) return;
     const response = await apiFetch("/api/courses/catalog", {
       method: "POST",
       body: {
@@ -627,14 +727,38 @@ async function loadCourseCatalog() {
       },
     });
     state.courseCatalog = Array.isArray(response.items) ? response.items : [];
+    state.courseCatalogLoaded = true;
     syncCatalogWithRegisteredCourses();
     renderAll();
-    showNotice(`${response.total_found || state.courseCatalog.length} curso(s) carregado(s) do Canvas.`, "success");
+    if (!silent) {
+      showNotice(`${response.total_found || state.courseCatalog.length} curso(s) carregado(s) do Canvas.`, "success");
+    }
   } catch (error) {
-    showNotice(error.message, "error");
+    if (!silent) {
+      showNotice(error.message, "error");
+    }
   } finally {
-    setBusy(button, false);
+    state.courseCatalogLoading = false;
+    if (button && !silent) {
+      setBusy(button, false);
+    }
   }
+}
+
+function hasUsableConnection() {
+  const baseUrl = normalizeBaseUrlInput($("#baseUrl").value);
+  const effectiveBaseUrl = baseUrl || normalizeBaseUrlInput(state.config?.default_base_url || "");
+  const accessToken = $("#apiToken").value.trim();
+  const envTokenAvailable = Boolean(state.config?.env_token_available);
+  return Boolean(effectiveBaseUrl && (accessToken || envTokenAvailable));
+}
+
+async function maybeAutoLoadCourseCatalog(options = {}) {
+  const force = Boolean(options.force);
+  if (state.courseCatalogLoading) return;
+  if (!force && state.courseCatalogLoaded) return;
+  if (!hasUsableConnection()) return;
+  await loadCourseCatalogInternal({ silent: true, force: true });
 }
 
 async function registerSelectedCatalogCourses() {
@@ -808,7 +932,10 @@ function renderTargetControls(kind, options = {}) {
   $(`#${kind}AllGroupsLine`).classList.toggle("hidden", !groupsMode);
   $(`#${kind}GroupPicker`).classList.toggle("hidden", !groupsMode);
   $(`#${kind}CoursePicker`).classList.toggle("hidden", !courseMode);
-  $(`#${kind === "announcement" ? "announcementAllGroups" : "messageAllGroups"}`).checked = target.selectAllGroups;
+  const allGroupsInput = $(`#${kind}AllGroups`);
+  if (allGroupsInput) {
+    allGroupsInput.checked = target.selectAllGroups;
+  }
   renderPickers(options);
   renderTargetSummary(kind);
   if (kind === "message") {
@@ -834,6 +961,12 @@ function renderPickers(options = {}) {
   });
   renderPicker("messageCoursePicker", coursePickerItems(), state.message.courseRefs, {
     preserveScroll: options.preservePickerId === "messageCoursePicker",
+  });
+  renderPicker("engagementGroupPicker", groupPickerItems(), state.engagement.groupIds, {
+    preserveScroll: options.preservePickerId === "engagementGroupPicker",
+  });
+  renderPicker("engagementCoursePicker", coursePickerItems(), state.engagement.courseRefs, {
+    preserveScroll: options.preservePickerId === "engagementCoursePicker",
   });
   renderCatalogCourseSummary();
 }
@@ -886,6 +1019,8 @@ function rerenderPickerById(pickerId, options = {}) {
     announcementCoursePicker: () => renderPicker("announcementCoursePicker", coursePickerItems(), state.announcement.courseRefs, options),
     messageGroupPicker: () => renderPicker("messageGroupPicker", groupPickerItems(), state.message.groupIds, options),
     messageCoursePicker: () => renderPicker("messageCoursePicker", coursePickerItems(), state.message.courseRefs, options),
+    engagementGroupPicker: () => renderPicker("engagementGroupPicker", groupPickerItems(), state.engagement.groupIds, options),
+    engagementCoursePicker: () => renderPicker("engagementCoursePicker", coursePickerItems(), state.engagement.courseRefs, options),
   };
   pickers[pickerId]?.();
 }
@@ -929,6 +1064,10 @@ function togglePickerValue(pickerId, value, checked, options = {}) {
   state.pickerReorder[pickerId] = false;
   target.set(nextValues);
   if (target.kind) {
+    if (target.kind === "engagement") {
+      state.engagement.preview = null;
+      renderEngagementPreview(null);
+    }
     renderTargetSummary(target.kind);
     if (target.kind === "message") {
       renderMessageInfoPanel();
@@ -999,6 +1138,22 @@ function pickerTarget(pickerId) {
         state.message.courseRefs = next;
       },
     },
+    engagementGroupPicker: {
+      kind: "engagement",
+      values: state.engagement.groupIds,
+      set(next) {
+        state.engagement.groupIds = next;
+        state.engagement.preview = null;
+      },
+    },
+    engagementCoursePicker: {
+      kind: "engagement",
+      values: state.engagement.courseRefs,
+      set(next) {
+        state.engagement.courseRefs = next;
+        state.engagement.preview = null;
+      },
+    },
   };
   return map[pickerId];
 }
@@ -1010,6 +1165,8 @@ function selectedValues(pickerId) {
   if (pickerId === "announcementCoursePicker") return state.announcement.courseRefs;
   if (pickerId === "messageGroupPicker") return state.message.groupIds;
   if (pickerId === "messageCoursePicker") return state.message.courseRefs;
+  if (pickerId === "engagementGroupPicker") return state.engagement.groupIds;
+  if (pickerId === "engagementCoursePicker") return state.engagement.courseRefs;
   return [];
 }
 
@@ -1056,6 +1213,18 @@ function renderTargetSummary(kind) {
     courses: "Cursos especificos",
   };
   const uniqueCourseRefs = unique(courses.map((course) => course.course_ref));
+  if (kind === "engagement") {
+    const previewSummary = state.engagement.preview?.summary || null;
+    summaryEl.innerHTML = `
+      <div class="summary-card"><span>Modo</span><strong>${modeLabelMap[target.mode] || "-"}</strong></div>
+      <div class="summary-card"><span>Grupos</span><strong>${target.mode === "groups" ? (target.selectAllGroups ? "Todos" : String(selectedGroups(kind).length)) : "-"}</strong></div>
+      <div class="summary-card"><span>Turmas selecionadas</span><strong>${escapeHtml(String(uniqueCourseRefs.length))}</strong></div>
+      <div class="summary-card"><span>Preview carregado</span><strong>${previewSummary ? "Sim" : "Nao"}</strong></div>
+      <div class="summary-card"><span>Alunos analisados</span><strong>${escapeHtml(String(previewSummary?.total_students_found || 0))}</strong></div>
+      <div class="summary-card"><span>Alunos alvo</span><strong>${escapeHtml(String(previewSummary?.total_matched_students || 0))}</strong></div>
+    `;
+    return;
+  }
   summaryEl.innerHTML = `
     <div class="summary-card"><span>Modo</span><strong>${modeLabelMap[target.mode] || "-"}</strong></div>
     <div class="summary-card"><span>Grupos</span><strong>${target.mode === "groups" ? (target.selectAllGroups ? "Todos" : String(selectedGroups(kind).length)) : "-"}</strong></div>
@@ -1091,6 +1260,97 @@ function renderMessageInfoPanel() {
       ${unique(courses.map((course) => `${course.course_name || course.course_ref} (${course.course_ref})`)).slice(0, 10).map((label) => `<span class="chip">${escapeHtml(label)}</span>`).join("")}
     </div>
   ` : "Escolha grupos salvos ou cursos especificos para ver o resumo aqui.";
+}
+
+function renderEngagementPreview(data) {
+  const target = $("#engagementPreviewCard");
+  if (!target) return;
+  renderTargetSummary("engagement");
+  if (!data) {
+    target.innerHTML = "Selecione as turmas e clique em buscar para ver quem entra no envio.";
+    target.classList.add("empty-state");
+    return;
+  }
+
+  target.classList.remove("empty-state");
+  const summary = data.summary || {};
+  const courses = Array.isArray(data.courses) ? data.courses : [];
+  const items = Array.isArray(data.items) ? data.items : [];
+  const notices = [];
+  if (summary.courses_without_module_requirements) {
+    notices.push(`${summary.courses_without_module_requirements} curso(s) sem requisitos de modulos configurados.`);
+  }
+  if (summary.analytics_unavailable_courses) {
+    notices.push(`${summary.analytics_unavailable_courses} curso(s) sem analytics disponivel.`);
+  }
+  if (summary.progress_unavailable_courses) {
+    notices.push(`${summary.progress_unavailable_courses} curso(s) sem progresso de modulos disponivel.`);
+  }
+
+  target.innerHTML = `
+    <div class="summary-grid">
+      <div class="summary-card"><span>Cursos</span><strong>${escapeHtml(String(summary.total_courses || 0))}</strong></div>
+      <div class="summary-card"><span>Alunos analisados</span><strong>${escapeHtml(String(summary.total_students_found || 0))}</strong></div>
+      <div class="summary-card"><span>Alunos que receberao</span><strong>${escapeHtml(String(summary.total_matched_students || 0))}</strong></div>
+      <div class="summary-card"><span>Sem acesso nenhum</span><strong>${escapeHtml(String(summary.total_never_accessed_matches || 0))}</strong></div>
+      <div class="summary-card"><span>Recursos pendentes</span><strong>${escapeHtml(String(summary.total_incomplete_resources_matches || 0))}</strong></div>
+      <div class="summary-card"><span>Criterio</span><strong>${escapeHtml(formatEngagementCriteria(summary.criteria_mode || $("#engagementCriteriaMode").value))}</strong></div>
+    </div>
+    ${notices.length ? `<div class="chips">${notices.map((item) => `<span class="chip dim">${escapeHtml(item)}</span>`).join("")}</div>` : ""}
+    ${courses.length ? renderTable(engagementCourseColumns(), courses) : `<div class="empty-state">Nenhum curso entrou no preview.</div>`}
+    ${items.length ? renderTable(engagementPreviewColumns(), items) : `<div class="empty-state">Nenhum aluno corresponde ao criterio selecionado.</div>`}
+  `;
+}
+
+function engagementCourseColumns() {
+  return [
+    { label: "Turma", format: (row) => `${escapeHtml(row.course_name || "-")}<div class="subtle mono">${escapeHtml(String(row.course_id || row.course_ref || "-"))}</div>` },
+    { label: "Alunos", format: (row) => escapeHtml(String(row.students_found || 0)) },
+    { label: "Alvo", format: (row) => escapeHtml(String(row.matched_students || 0)) },
+    { label: "Sem acesso", format: (row) => escapeHtml(String(row.never_accessed_matches || 0)) },
+    { label: "Pendentes", format: (row) => escapeHtml(String(row.incomplete_resources_matches || 0)) },
+    { label: "Modulo", format: (row) => row.has_module_requirements ? "Sim" : "Nao" },
+    { label: "Status API", format: (row) => `${row.analytics_available ? "Analytics ok" : "Analytics indisponivel"}<div class="subtle">${row.progress_available ? "Progress ok" : "Progress indisponivel"}</div>` },
+  ];
+}
+
+function engagementPreviewColumns() {
+  return [
+    { label: "Turma", format: (row) => `${escapeHtml(row.course_name || "-")}<div class="subtle mono">${escapeHtml(String(row.course_ref || row.course_id || "-"))}</div>` },
+    { label: "Aluno", format: (row) => `${escapeHtml(row.student_name || "-")}<div class="subtle mono">${escapeHtml(String(row.user_id || "-"))}</div>` },
+    { label: "Acessos", format: (row) => `${escapeHtml(String(row.page_views || 0))} visualizacoes<div class="subtle">${escapeHtml(String(row.participations || 0))} participacoes</div>` },
+    { label: "Recursos", format: (row) => `${escapeHtml(String(row.requirement_completed_count || 0))}/${escapeHtml(String(row.requirement_count || 0))}` },
+    { label: "Motivo", format: (row) => escapeHtml(row.reasons_label || "-") },
+  ];
+}
+
+async function previewEngagementTargets() {
+  const button = $("#previewEngagementBtn");
+  setBusy(button, true, "Carregando...");
+  hideNotice();
+  clearFieldValidation();
+  try {
+    if (!ensureConnectionConfigured() || !ensureTargetSelection("engagement")) return;
+    const response = await apiFetch("/api/engagement/inactive-targets", {
+      method: "POST",
+      body: {
+        ...getConnectionPayload(),
+        ...getTargetPayload("engagement"),
+        criteria_mode: $("#engagementCriteriaMode").value,
+      },
+    });
+    state.engagement.preview = response;
+    renderTargetSummary("engagement");
+    renderEngagementPreview(response);
+    showNotice("Quantidade de alunos inativos por turma carregada com sucesso.", "success");
+  } catch (error) {
+    state.engagement.preview = null;
+    renderTargetSummary("engagement");
+    renderEngagementPreview(null);
+    showNotice(error.message, "error");
+  } finally {
+    setBusy(button, false);
+  }
 }
 
 function toggleScheduleField() {
@@ -1193,6 +1453,53 @@ async function submitMessageJob(event) {
   }
 }
 
+async function submitEngagementJob(event) {
+  event.preventDefault();
+  const button = $("#engagementForm button[type='submit']");
+  setBusy(button, true, "Enfileirando...");
+  hideNotice();
+  clearFieldValidation();
+  try {
+    if (!ensureConnectionConfigured() || !ensureTargetSelection("engagement")) return;
+    if (!state.engagement.preview) {
+      showNotice("Busque primeiro a quantidade de alunos por turma antes de enviar a mensagem para inativos.", "error");
+      openTab("engagement");
+      focusField("#previewEngagementBtn");
+      return;
+    }
+    if (!$("#engagementSubject").value.trim()) {
+      markInvalid("#engagementSubject");
+      focusField("#engagementSubject");
+      showNotice("Informe o assunto da mensagem para inativos.", "error");
+      return;
+    }
+    if (!$("#engagementMessage").value.trim()) {
+      markInvalid("#engagementMessage");
+      focusField("#engagementMessage");
+      showNotice("Informe a mensagem para os alunos inativos.", "error");
+      return;
+    }
+    const response = await apiFetch("/api/engagement/jobs", {
+      method: "POST",
+      body: {
+        ...getConnectionPayload(),
+        ...getTargetPayload("engagement"),
+        criteria_mode: $("#engagementCriteriaMode").value,
+        subject: $("#engagementSubject").value.trim(),
+        message: $("#engagementMessage").value.trim(),
+        dry_run: $("#engagementDryRun").checked,
+      },
+    });
+    renderEngagementJob(response.job);
+    startPolling(response.job.id, "engagement");
+    showNotice("Lote de mensagens para alunos inativos enfileirado.", "success");
+  } catch (error) {
+    showNotice(error.message, "error");
+  } finally {
+    setBusy(button, false);
+  }
+}
+
 function startPolling(jobId, kind) {
   stopPolling(kind);
   const poll = async () => {
@@ -1200,6 +1507,7 @@ function startPolling(jobId, kind) {
       const job = await apiFetch(`/api/jobs/${jobId}`);
       if (kind === "announcement") renderAnnouncementJob(job);
       if (kind === "message") renderMessageJob(job);
+      if (kind === "engagement") renderEngagementJob(job);
       if (["completed", "failed"].includes(job.status)) {
         stopPolling(kind);
         await loadHistory();
@@ -1244,6 +1552,19 @@ function renderMessageJob(job) {
   ]);
 }
 
+function renderEngagementJob(job) {
+  $("#engagementJobCard").innerHTML = renderJobLayout(job, [
+    { label: "Turma", format: (row) => `${escapeHtml(row.course_name || "-")}<div class="subtle mono">${escapeHtml(String(row.course_id || row.course_ref || "-"))}</div>` },
+    { label: "Alunos", format: (row) => escapeHtml(String(row.students_found || 0)) },
+    { label: "Alvo", format: (row) => escapeHtml(String(row.recipients_targeted || 0)) },
+    { label: "Sem acesso", format: (row) => escapeHtml(String(row.never_accessed_matches || 0)) },
+    { label: "Pendentes", format: (row) => escapeHtml(String(row.incomplete_resources_matches || 0)) },
+    { label: "Enviados", format: (row) => escapeHtml(String(row.recipients_sent || 0)) },
+    { label: "Status", format: (row) => statusChip(row.status) },
+    { label: "Erro", format: (row) => escapeHtml(row.error || "-") },
+  ]);
+}
+
 function renderJobLayout(job, columns) {
   const progress = job.progress || { percent: 0, current: 0, total: 0, step: "-" };
   const summaryEntries = Object.entries(job.result?.summary || {}).filter(([, value]) => typeof value !== "object");
@@ -1276,6 +1597,7 @@ function renderReportMetrics() {
     metricCard("Duracao media", `${formatSummaryValue(overview.avg_duration_seconds || 0)}s`),
     metricCard("Mensagens enviadas", overview.total_recipients_sent || 0),
     metricCard("Comunicados criados", overview.total_announcements_created || 0),
+    metricCard("Inativos", overview.total_engagement_jobs || 0),
   ].join("");
 }
 
@@ -1343,6 +1665,18 @@ function renderReportDetail() {
 }
 
 function reportColumns(kind) {
+  if (kind === "engagement") {
+    return [
+      { label: "Turma", format: (row) => `${escapeHtml(row.course_name || "-")}<div class="subtle mono">${escapeHtml(String(row.course_id || row.course_ref || "-"))}</div>` },
+      { label: "Alunos", format: (row) => escapeHtml(String(row.students_found || 0)) },
+      { label: "Alvo", format: (row) => escapeHtml(String(row.recipients_targeted || 0)) },
+      { label: "Sem acesso", format: (row) => escapeHtml(String(row.never_accessed_matches || 0)) },
+      { label: "Pendentes", format: (row) => escapeHtml(String(row.incomplete_resources_matches || 0)) },
+      { label: "Enviados", format: (row) => escapeHtml(String(row.recipients_sent || 0)) },
+      { label: "Status", format: (row) => statusChip(row.status) },
+      { label: "Erro", format: (row) => escapeHtml(row.error || "-") },
+    ];
+  }
   if (kind === "message") {
     return [
       { label: "Turma", format: (row) => `${escapeHtml(row.course_name || "-")}<div class="subtle mono">${escapeHtml(String(row.course_id || row.course_ref || "-"))}</div>` },
@@ -1377,6 +1711,7 @@ function reportAnalyticsColumns(sectionKey) {
       { label: "Data", format: (row) => escapeHtml(row.date || "-") },
       { label: "Comunicados", format: (row) => escapeHtml(String(row.announcement || 0)) },
       { label: "Mensagens", format: (row) => escapeHtml(String(row.message || 0)) },
+      { label: "Inativos", format: (row) => escapeHtml(String(row.engagement || 0)) },
       { label: "Concluidos", format: (row) => escapeHtml(String(row.completed || 0)) },
       { label: "Falhas", format: (row) => escapeHtml(String(row.failed || 0)) },
     ];
@@ -1572,12 +1907,14 @@ async function wipeDatabase() {
     });
     stopPolling("announcement");
     stopPolling("message");
+    stopPolling("engagement");
     state.connectionSnapshot = null;
     state.selectedReportId = null;
     state.history = [];
     state.groups = [];
     state.registeredCourses = [];
     state.reportAnalytics = null;
+    state.engagement.preview = null;
     $("#wipeDatabaseConfirm").value = "";
     await loadConfig();
     await loadHistory();
@@ -1635,4 +1972,13 @@ function formatEnvTokenSource(value) {
     none: "nao configurado",
   };
   return map[value] || value || "token";
+}
+
+function formatEngagementCriteria(value) {
+  const map = {
+    never_accessed: "Somente sem acesso nenhum",
+    incomplete_resources: "Somente com recursos pendentes",
+    never_accessed_or_incomplete_resources: "Sem acesso nenhum ou com recursos pendentes",
+  };
+  return map[value] || value || "-";
 }

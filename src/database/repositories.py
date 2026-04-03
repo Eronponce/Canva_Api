@@ -764,6 +764,7 @@ class ReportRepository:
             "avg_duration_seconds": round(sum(durations) / len(durations), 2) if durations else 0,
             "total_recipients_sent": total_recipients_sent,
             "total_announcements_created": total_announcements,
+            "total_engagement_jobs": by_kind.get("engagement", {}).get("jobs", 0),
         }
 
         daily_items = [{"date": key, **value} for key, value in sorted(daily.items(), key=lambda item: item[0], reverse=True)]

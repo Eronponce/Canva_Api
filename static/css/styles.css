@@ -239,7 +239,8 @@ code,
 .panel-grid-settings,
 .panel-grid-reports,
 .panel-grid-announcements,
-.panel-grid-messages {
+.panel-grid-messages,
+.panel-grid-engagement {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
@@ -271,6 +272,38 @@ code,
   margin-top: 14px;
   padding-top: 12px;
   border-top: 1px solid var(--line);
+}
+
+.engagement-toolbar-card {
+  background: linear-gradient(180deg, rgba(18, 26, 36, 0.98), rgba(15, 22, 31, 0.98));
+  backdrop-filter: blur(8px);
+}
+
+.engagement-toolbar-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(0, 1.55fr) minmax(300px, 0.95fr);
+  align-items: start;
+}
+
+.engagement-toolbar-primary,
+.engagement-toolbar-secondary {
+  display: grid;
+  gap: 10px;
+}
+
+.engagement-toolbar-secondary {
+  align-content: start;
+}
+
+.engagement-toolbar-secondary .button-row {
+  justify-content: flex-end;
+}
+
+.engagement-note {
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.55;
 }
 
 .subsection-header {
@@ -988,7 +1021,8 @@ pre {
 
 @media (max-width: 1480px) {
   .panel-grid-announcements,
-  .panel-grid-messages {
+  .panel-grid-messages,
+  .panel-grid-engagement {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
@@ -999,7 +1033,8 @@ pre {
   .panel-grid-organization,
   .panel-grid-settings,
   .panel-grid-reports,
-  .field-grid {
+  .field-grid,
+  .engagement-toolbar-grid {
     grid-template-columns: 1fr;
   }
 }
@@ -1016,7 +1051,8 @@ pre {
   }
 
   .panel-grid-announcements,
-  .panel-grid-messages {
+  .panel-grid-messages,
+  .panel-grid-engagement {
     grid-template-columns: 1fr;
   }
 

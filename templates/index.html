@@ -46,15 +46,22 @@
             <small>mensagens</small>
           </span>
         </button>
-        <button class="tab-button" data-tab="settings" type="button">
+        <button class="tab-button" data-tab="engagement" type="button">
           <span class="tab-step">05</span>
+          <span class="tab-copy">
+            <strong>Inativos</strong>
+            <small>mensagem automatica</small>
+          </span>
+        </button>
+        <button class="tab-button" data-tab="settings" type="button">
+          <span class="tab-step">06</span>
           <span class="tab-copy">
             <strong>Configuracoes</strong>
             <small>.env local</small>
           </span>
         </button>
         <button class="tab-button" data-tab="reports" type="button">
-          <span class="tab-step">06</span>
+          <span class="tab-step">07</span>
           <span class="tab-copy">
             <strong>Relatorios</strong>
             <small>historico e csv</small>
@@ -370,6 +377,118 @@
         </article>
       </section>
 
+      <section id="tab-engagement" class="tab-panel">
+        <div class="panel-grid panel-grid-engagement">
+          <article class="card span-two engagement-toolbar-card">
+            <div class="card-header">
+              <div>
+                <h2>Enviar mensagem para alunos inativos</h2>
+                <p>Selecione as turmas, defina o filtro e carregue a quantidade por turma antes do envio.</p>
+              </div>
+            </div>
+
+            <div class="engagement-toolbar-grid">
+              <div class="engagement-toolbar-primary">
+                <div class="mode-switch" id="engagementModeSwitch">
+                  <button class="mode-button active" type="button" data-kind="engagement" data-mode="groups">Grupos salvos</button>
+                  <button class="mode-button" type="button" data-kind="engagement" data-mode="courses">Cursos especificos</button>
+                  <label class="switch-line" id="engagementAllGroupsLine">
+                    <input id="engagementAllGroups" class="switch-input" type="checkbox">
+                    <span class="switch-track" aria-hidden="true"></span>
+                    <span class="switch-copy">Usar todos os grupos</span>
+                  </label>
+                </div>
+
+                <div id="engagementGroupPicker" class="picker-shell"></div>
+                <div id="engagementCoursePicker" class="picker-shell hidden"></div>
+              </div>
+
+              <div class="engagement-toolbar-secondary">
+                <label class="field">
+                  <span>Filtro da selecao</span>
+                  <select id="engagementCriteriaMode">
+                    <option value="never_accessed_or_incomplete_resources">Sem acesso nenhum ou com recursos pendentes</option>
+                    <option value="never_accessed">Somente sem acesso nenhum</option>
+                    <option value="incomplete_resources">Somente com recursos pendentes</option>
+                  </select>
+                </label>
+
+                <div class="button-row">
+                  <button id="previewEngagementBtn" class="btn btn-secondary" type="button">Buscar quantidade por turma</button>
+                </div>
+
+                <p class="engagement-note">O criterio de recursos pendentes depende de requisitos de modulos configurados no Canvas.</p>
+              </div>
+            </div>
+          </article>
+
+          <article class="card span-two">
+            <div class="card-header">
+              <div>
+                <h2>Resumo da selecao</h2>
+                <p>Depois da busca, aqui aparece quantas turmas e quantos alunos entram no envio.</p>
+              </div>
+            </div>
+            <div id="engagementTargetSummary" class="summary-grid"></div>
+          </article>
+
+          <article class="card">
+            <div class="card-header">
+              <div>
+                <h2>Quem vai receber</h2>
+                <p>Confira a quantidade por turma e os alunos encontrados antes de enviar.</p>
+              </div>
+            </div>
+            <div id="engagementPreviewCard" class="job-output empty-state">Selecione as turmas e clique em buscar para ver quem entra no envio.</div>
+          </article>
+
+          <article class="card">
+            <div class="card-header">
+              <div>
+                <h2>Mensagem</h2>
+                <p>O envio acontece aluno por aluno, sempre no contexto do curso correspondente.</p>
+              </div>
+            </div>
+            <form id="engagementForm" class="stack-form">
+              <label class="field">
+                <span>Assunto</span>
+                <input id="engagementSubject" type="text" placeholder="Acompanhamento de acesso ao curso">
+              </label>
+
+              <label class="field">
+                <span>Mensagem</span>
+                {% raw %}
+                <textarea id="engagementMessage" rows="12" placeholder="Ola {{student_name}},&#10;&#10;Percebemos que no curso {{course_name}} voce esta com o seguinte status: {{reason}}."></textarea>
+                <small class="field-help">Placeholders disponiveis: {{student_name}}, {{course_name}}, {{course_ref}}, {{reason}}</small>
+                {% endraw %}
+              </label>
+
+              <div class="switch-stack">
+                <label class="switch-line">
+                  <input id="engagementDryRun" class="switch-input" type="checkbox">
+                  <span class="switch-track" aria-hidden="true"></span>
+                  <span class="switch-copy">Modo teste</span>
+                </label>
+              </div>
+
+              <div class="button-row">
+                <button class="btn btn-primary" type="submit">Enviar para os alunos encontrados</button>
+              </div>
+            </form>
+          </article>
+
+          <article class="card span-two">
+            <div class="card-header">
+              <div>
+                <h2>Resultado do envio</h2>
+                <p>Acompanhe o lote, baixe o CSV e veja o consolidado por turma.</p>
+              </div>
+            </div>
+            <div id="engagementJobCard" class="job-output empty-state">Nenhum lote de alunos inativos iniciado.</div>
+          </article>
+        </div>
+      </section>
+
       <section id="tab-settings" class="tab-panel">
         <div class="panel-grid panel-grid-settings">
           <article class="card">
@@ -423,6 +542,8 @@
               <code>GET /api/v1/courses</code>
               <code>GET /api/v1/courses/:course_id</code>
               <code>GET /api/v1/courses/:course_id/users?enrollment_type[]=student</code>
+              <code>GET /api/v1/courses/:course_id/analytics/student_summaries</code>
+              <code>GET /api/v1/courses/:course_id/bulk_user_progress</code>
               <code>POST /api/v1/courses/:course_id/discussion_topics</code>
               <code>GET /api/v1/search/recipients</code>
               <code>POST /api/v1/conversations</code>
