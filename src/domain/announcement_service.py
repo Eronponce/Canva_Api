@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import re
 from pathlib import Path
 
 from src.services.canvas_client import CanvasApiError
@@ -360,5 +361,5 @@ class AnnouncementService:
     def _render_template(template: str, **context: str | None) -> str:
         rendered = str(template or "")
         for key, value in context.items():
-            rendered = rendered.replace(f"{{{{{key}}}}}", str(value or ""))
+            rendered = re.sub(r"{{\s*" + re.escape(key) + r"\s*}}", str(value or ""), rendered)
         return rendered

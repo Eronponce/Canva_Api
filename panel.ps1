@@ -1,6 +1,6 @@
 param(
-    [ValidateSet("start", "stop", "restart", "status", "open")]
-    [string]$Action = "start"
+    [ValidateSet("start", "stop", "restart", "status", "open", "gui")]
+    [string]$Action = "gui"
 )
 
 $ErrorActionPreference = "Stop"
@@ -13,6 +13,7 @@ $PidFile = Join-Path $LogsDir "server.pid"
 $EnvFile = Join-Path $ProjectRoot ".env"
 $Url = "http://127.0.0.1:5000"
 $CondaPython = Join-Path $env:USERPROFILE ".conda\envs\canvas-bulk-panel\python.exe"
+$LauncherScript = Join-Path $ProjectRoot "panel_launcher.py"
 
 if (-not (Test-Path $LogsDir)) {
     New-Item -ItemType Directory -Path $LogsDir | Out-Null
@@ -169,6 +170,14 @@ function Open-PanelUrl {
     }
 }
 
+function Open-PanelGui {
+    $pythonExe = Get-PythonPath
+    if (-not (Test-Path $LauncherScript)) {
+        throw "Nao encontrei o launcher em $LauncherScript"
+    }
+    Start-Process -FilePath $pythonExe -ArgumentList "`"$LauncherScript`"" -WorkingDirectory $ProjectRoot | Out-Null
+}
+
 switch ($Action) {
     "start" { Start-App }
     "stop" { Stop-App }
@@ -178,4 +187,5 @@ switch ($Action) {
     }
     "status" { Show-Status }
     "open" { Open-PanelUrl }
+    "gui" { Open-PanelGui }
 }

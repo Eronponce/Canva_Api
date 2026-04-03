@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import re
 from pathlib import Path
 
 from src.services.canvas_client import CanvasApiError
@@ -36,6 +37,7 @@ class MessageService:
                     "course_ref": course_ref,
                     "course_id": course.get("id"),
                     "course_name": course.get("name"),
+                    "course_code": course.get("course_code") or "",
                     "students_found": len(students),
                 }
             )
@@ -214,6 +216,7 @@ class MessageService:
                     "course_ref": course_ref,
                     "course_id": course.get("id"),
                     "course_name": course.get("name"),
+                    "course_code": course.get("course_code") or "",
                     "context_code": f"course_{course.get('id')}",
                     "students": students,
                     "context_match": context_match,
@@ -347,10 +350,22 @@ class MessageService:
 
             if result_row["strategy_used"] == "context":
                 try:
+                    rendered_subject = self._render_template(
+                        subject,
+                        course_name=prepared_course["course_name"],
+                        course_ref=prepared_course["course_ref"],
+                        course_code=prepared_course.get("course_code"),
+                    )
+                    rendered_message = self._render_template(
+                        message,
+                        course_name=prepared_course["course_name"],
+                        course_ref=prepared_course["course_ref"],
+                        course_code=prepared_course.get("course_code"),
+                    )
                     response = client.create_conversation(
                         recipients=[prepared_course["context_code"]],
-                        subject=subject,
-                        body=message,
+                        subject=rendered_subject,
+                        body=rendered_message,
                         context_code=prepared_course["context_code"],
                         force_new=True,
                         group_conversation=False,
@@ -379,13 +394,25 @@ class MessageService:
                     )
             else:
                 batch_failures = []
+                rendered_subject = self._render_template(
+                    subject,
+                    course_name=prepared_course["course_name"],
+                    course_ref=prepared_course["course_ref"],
+                    course_code=prepared_course.get("course_code"),
+                )
+                rendered_message = self._render_template(
+                    message,
+                    course_name=prepared_course["course_name"],
+                    course_ref=prepared_course["course_ref"],
+                    course_code=prepared_course.get("course_code"),
+                )
                 for recipient_chunk in chunked(target_ids, self.MAX_RECIPIENTS_PER_CALL):
                     result_row["batch_count"] += 1
                     try:
                         response = client.create_conversation(
                             recipients=recipient_chunk,
-                            subject=subject,
-                            body=message,
+                            subject=rendered_subject,
+                            body=rendered_message,
                             context_code=prepared_course["context_code"],
                             force_new=True,
                             group_conversation=False,
@@ -490,6 +517,13 @@ class MessageService:
         if isinstance(response, dict) and response.get("id") is not None:
             return [response["id"]]
         return []
+
+    @staticmethod
+    def _render_template(template: str, **context: str | None) -> str:
+        rendered = str(template or "")
+        for key, value in context.items():
+            rendered = re.sub(r"{{\s*" + re.escape(key) + r"\s*}}", str(value or ""), rendered)
+        return rendered
 
     def _write_report(self, job_id: str, rows: list[dict]) -> str:
         report_filename = f"message-report-{job_id}.csv"

@@ -219,7 +219,7 @@
             <form id="announcementForm" class="stack-form">
               <label class="field">
                 <span>Titulo</span>
-                <input id="announcementTitle" type="text" placeholder="Atualizacao importante da disciplina">
+                <input id="announcementTitle" data-template-scope="announcement" type="text" placeholder="Atualizacao importante da disciplina">
                 {% raw %}
                 <small class="field-help">Placeholders disponiveis: {{course_name}}, {{course_ref}}, {{course_code}}</small>
                 {% endraw %}
@@ -227,11 +227,19 @@
 
               <label class="field">
                 <span>Mensagem HTML simples</span>
-                <textarea id="announcementMessage" rows="12" placeholder="<p>Ola turma,</p><p>Segue o recado...</p>"></textarea>
+                <textarea id="announcementMessage" data-template-scope="announcement" rows="12" placeholder="<p>Ola turma,</p><p>Segue o recado...</p>"></textarea>
                 {% raw %}
                 <small class="field-help">Use {{course_name}}, {{course_ref}} ou {{course_code}} para personalizar por disciplina.</small>
                 {% endraw %}
               </label>
+
+              <div class="template-tools">
+                <div class="template-tool-head">
+                  <strong>Variaveis seguras</strong>
+                  <p>Arraste ou clique nos blocos para inserir sem risco de erro.</p>
+                </div>
+                <div id="announcementTokenPalette" class="token-palette"></div>
+              </div>
 
               <label class="field">
                 <span>Anexo opcional</span>
@@ -278,9 +286,11 @@
               <div class="subsection-header">
                 <div>
                   <h3>Pre-visualizacao</h3>
-                  <p>Confira o HTML renderizado antes de enviar.</p>
+                  <p>Confira como o comunicado fica com a primeira turma selecionada.</p>
                 </div>
               </div>
+              <div id="announcementTemplateStatus" class="template-status"></div>
+              <div id="announcementPreviewTitle" class="template-preview-headline">Nenhuma turma selecionada para gerar amostra.</div>
               <iframe id="announcementPreview" class="preview-frame" title="Pre-visualizacao do comunicado"></iframe>
             </div>
           </article>
@@ -335,13 +345,27 @@
             <form id="messageForm" class="stack-form">
               <label class="field">
                 <span>Assunto</span>
-                <input id="messageSubject" type="text" placeholder="Aviso importante">
+                <input id="messageSubject" data-template-scope="message" type="text" placeholder="Aviso importante">
+                {% raw %}
+                <small class="field-help">Placeholders disponiveis: {{course_name}}, {{course_ref}}, {{course_code}}</small>
+                {% endraw %}
               </label>
 
               <label class="field">
                 <span>Mensagem</span>
-                <textarea id="messageBody" rows="12" placeholder="Ola turma,&#10;&#10;Estou enviando este aviso para todos os alunos..."></textarea>
+                <textarea id="messageBody" data-template-scope="message" rows="12" placeholder="Ola turma,&#10;&#10;Estou enviando este aviso para todos os alunos..."></textarea>
+                {% raw %}
+                <small class="field-help">Use {{course_name}}, {{course_ref}} ou {{course_code}} para personalizar a mensagem por disciplina.</small>
+                {% endraw %}
               </label>
+
+              <div class="template-tools">
+                <div class="template-tool-head">
+                  <strong>Variaveis seguras</strong>
+                  <p>Arraste ou clique nos blocos para inserir sem digitar manualmente.</p>
+                </div>
+                <div id="messageTokenPalette" class="token-palette"></div>
+              </div>
 
               <label class="field">
                 <span>Anexo opcional</span>
@@ -376,6 +400,17 @@
                 <button class="btn btn-primary" type="submit">Enviar mensagem</button>
               </div>
             </form>
+
+            <div class="card-subsection">
+              <div class="subsection-header">
+                <div>
+                  <h3>Pre-visualizacao</h3>
+                  <p>Amostra do assunto e da mensagem com a primeira turma selecionada.</p>
+                </div>
+              </div>
+              <div id="messageTemplateStatus" class="template-status"></div>
+              <div id="messagePreviewPanel" class="message-preview-panel empty-state">Selecione uma turma para gerar a amostra da caixa de entrada.</div>
+            </div>
           </article>
 
           <article class="card span-two">
@@ -443,7 +478,7 @@
 
               <label class="field">
                 <span>Titulo do aviso</span>
-                <input id="recurrenceTitle" type="text" placeholder="Encontro semanal da disciplina">
+                <input id="recurrenceTitle" data-template-scope="recurrence" type="text" placeholder="Encontro semanal da disciplina">
                 {% raw %}
                 <small class="field-help">Placeholders disponiveis: {{course_name}}, {{course_ref}}, {{course_code}}</small>
                 {% endraw %}
@@ -451,11 +486,19 @@
 
               <label class="field">
                 <span>Mensagem HTML simples</span>
-                <textarea id="recurrenceMessage" rows="10" placeholder="<p>Ola turma,</p><p>Nosso encontro acontece hoje as 19h.</p>"></textarea>
+                <textarea id="recurrenceMessage" data-template-scope="recurrence" rows="10" placeholder="<p>Ola turma,</p><p>Nosso encontro acontece hoje as 19h.</p>"></textarea>
                 {% raw %}
                 <small class="field-help">Use {{course_name}}, {{course_ref}} ou {{course_code}} para personalizar cada aviso por curso.</small>
                 {% endraw %}
               </label>
+
+              <div class="template-tools">
+                <div class="template-tool-head">
+                  <strong>Variaveis seguras</strong>
+                  <p>Arraste ou clique nos blocos para montar avisos recorrentes sem erro.</p>
+                </div>
+                <div id="recurrenceTokenPalette" class="token-palette"></div>
+              </div>
 
               <div class="field-grid">
                 <label class="field">
@@ -502,9 +545,11 @@
               <div class="subsection-header">
                 <div>
                   <h3>Previsao</h3>
-                  <p>Confira as proximas datas antes de criar os avisos no Canvas.</p>
+                  <p>Confira as proximas datas e uma amostra do aviso com a primeira turma selecionada.</p>
                 </div>
               </div>
+              <div id="recurrenceTemplateStatus" class="template-status"></div>
+              <div id="recurrenceMessagePreview" class="message-preview-panel empty-state">Selecione as turmas para gerar a amostra da recorrencia.</div>
               <div id="recurrencePreviewSummary" class="summary-grid"></div>
               <div id="recurrenceSchedulePreview" class="compact-list empty-state">Selecione as turmas e clique em prever datas.</div>
             </div>

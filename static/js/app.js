@@ -24,6 +24,7 @@ const state = {
     data: null,
   },
   selectedReportId: null,
+  templateFocusFieldId: null,
   pickerSearch: {},
   pickerReorder: {},
   announcement: {
@@ -61,6 +62,8 @@ document.addEventListener("DOMContentLoaded", () => {
   restoreUiState();
   toggleScheduleField();
   updateAnnouncementPreview();
+  updateMessagePreview();
+  updateRecurrenceSamplePreview();
   loadInitialData();
 });
 
@@ -180,12 +183,20 @@ function bindEvents() {
   document.addEventListener("change", handleDelegatedChange);
   document.addEventListener("focusin", handleDelegatedFocusIn);
   document.addEventListener("focusout", handleDelegatedFocusOut);
+  document.addEventListener("dragstart", handleDelegatedDragStart);
+  document.addEventListener("dragover", handleDelegatedDragOver);
+  document.addEventListener("dragleave", handleDelegatedDragLeave);
+  document.addEventListener("dragend", clearTemplateDragState);
+  document.addEventListener("drop", handleDelegatedDrop);
 
   $("#publishMode").addEventListener("change", () => {
     toggleScheduleField();
     persistUiState();
   });
-  $("#announcementTitle").addEventListener("input", persistUiState);
+  $("#announcementTitle").addEventListener("input", () => {
+    updateAnnouncementPreview();
+    persistUiState();
+  });
   $("#announcementMessage").addEventListener("input", () => {
     updateAnnouncementPreview();
     persistUiState();
@@ -196,8 +207,14 @@ function bindEvents() {
   $("#announcementAttachment").addEventListener("change", updateAttachmentMeta);
   $("#announcementForm").addEventListener("submit", submitAnnouncementJob);
 
-  $("#messageSubject").addEventListener("input", persistUiState);
-  $("#messageBody").addEventListener("input", persistUiState);
+  $("#messageSubject").addEventListener("input", () => {
+    updateMessagePreview();
+    persistUiState();
+  });
+  $("#messageBody").addEventListener("input", () => {
+    updateMessagePreview();
+    persistUiState();
+  });
   $("#messageStrategy").addEventListener("change", persistUiState);
   $("#messageDedupe").addEventListener("change", persistUiState);
   $("#messageDryRun").addEventListener("change", persistUiState);
@@ -205,8 +222,14 @@ function bindEvents() {
   $("#messageForm").addEventListener("submit", submitMessageJob);
 
   $("#recurrenceName").addEventListener("input", persistUiState);
-  $("#recurrenceTitle").addEventListener("input", persistUiState);
-  $("#recurrenceMessage").addEventListener("input", persistUiState);
+  $("#recurrenceTitle").addEventListener("input", () => {
+    updateRecurrenceSamplePreview();
+    persistUiState();
+  });
+  $("#recurrenceMessage").addEventListener("input", () => {
+    updateRecurrenceSamplePreview();
+    persistUiState();
+  });
   $("#recurrenceType").addEventListener("change", persistUiState);
   $("#recurrenceInterval").addEventListener("input", persistUiState);
   $("#recurrenceFirstPublishAt").addEventListener("input", persistUiState);
@@ -246,6 +269,12 @@ function bindEvents() {
 }
 
 function handleDelegatedClick(event) {
+  const tokenChip = event.target.closest("[data-template-token]");
+  if (tokenChip) {
+    insertTemplateToken(tokenChip.dataset.templateScope, tokenChip.dataset.templateToken);
+    return;
+  }
+
   const modeButton = event.target.closest("[data-kind][data-mode]");
   if (modeButton) {
     const kind = modeButton.dataset.kind;
@@ -297,6 +326,13 @@ function handleDelegatedChange(event) {
 }
 
 function handleDelegatedFocusIn(event) {
+  const templateField = event.target.closest("[data-template-scope]");
+  if (templateField) {
+    state.templateFocusFieldId = templateField.id;
+    document.querySelectorAll("[data-template-scope]").forEach((field) => {
+      field.classList.toggle("template-target-active", field === templateField);
+    });
+  }
   const root = event.target.closest("[data-picker-root]");
   if (!root) return;
   const pickerId = root.dataset.pickerRoot;
@@ -304,6 +340,16 @@ function handleDelegatedFocusIn(event) {
 }
 
 function handleDelegatedFocusOut(event) {
+  const templateField = event.target.closest("[data-template-scope]");
+  if (templateField) {
+    window.setTimeout(() => {
+      const activeField = document.activeElement?.closest?.("[data-template-scope]") || null;
+      document.querySelectorAll("[data-template-scope]").forEach((field) => {
+        field.classList.toggle("template-target-active", field === activeField);
+      });
+      state.templateFocusFieldId = activeField?.id || null;
+    }, 0);
+  }
   const root = event.target.closest("[data-picker-root]");
   if (!root) return;
   const pickerId = root.dataset.pickerRoot;
@@ -318,6 +364,48 @@ function handleDelegatedFocusOut(event) {
     state.pickerReorder[pickerId] = true;
     rerenderPickerById(pickerId);
   }, 40);
+}
+
+function handleDelegatedDragStart(event) {
+  const tokenChip = event.target.closest("[data-template-token]");
+  if (!tokenChip || !event.dataTransfer) return;
+  event.dataTransfer.setData("text/template-token", tokenChip.dataset.templateToken || "");
+  event.dataTransfer.setData("text/template-scope", tokenChip.dataset.templateScope || "");
+  event.dataTransfer.effectAllowed = "copy";
+}
+
+function handleDelegatedDragOver(event) {
+  const targetField = event.target.closest("[data-template-scope]");
+  if (!targetField || !event.dataTransfer?.types?.includes("text/template-token")) return;
+  const scope = event.dataTransfer.getData("text/template-scope");
+  if (scope && scope !== targetField.dataset.templateScope) return;
+  event.preventDefault();
+  targetField.classList.add("template-target-dragover");
+}
+
+function handleDelegatedDrop(event) {
+  const targetField = event.target.closest("[data-template-scope]");
+  if (!targetField || !event.dataTransfer) return;
+  const token = event.dataTransfer.getData("text/template-token");
+  const scope = event.dataTransfer.getData("text/template-scope");
+  if (!token || (scope && scope !== targetField.dataset.templateScope)) return;
+  event.preventDefault();
+  clearTemplateDragState();
+  insertTextAtCursor(targetField, token);
+  targetField.focus();
+  handleTemplateFieldChanged(targetField.dataset.templateScope);
+}
+
+function handleDelegatedDragLeave(event) {
+  const targetField = event.target.closest("[data-template-scope]");
+  if (!targetField) return;
+  targetField.classList.remove("template-target-dragover");
+}
+
+function clearTemplateDragState() {
+  document.querySelectorAll(".template-target-dragover").forEach((field) => {
+    field.classList.remove("template-target-dragover");
+  });
 }
 
 function restoreUiState() {
@@ -687,7 +775,10 @@ function renderAll() {
   renderEngagementPreview(state.engagement.preview);
   renderReports();
   renderSettingsInfo(state.config || {});
+  renderTemplateAssistants();
   updateAnnouncementPreview();
+  updateMessagePreview();
+  updateRecurrenceSamplePreview();
   updateAttachmentMeta({ target: $("#announcementAttachment") });
   updateAttachmentMeta({ target: $("#messageAttachment") });
   renderEnvEditorState();
@@ -1274,17 +1365,21 @@ function renderReviewMessage(kind, data) {
   }
 
   if (kind === "message") {
+    const sampleCourse = firstReviewCourse(data?.courses || []);
+    const previewSubject = renderCourseTemplate(request.subject || "-", sampleCourse);
+    const previewBody = renderCourseTemplate(request.message || "", sampleCourse);
     return `
       <div class="message-block">
-        <strong>${escapeHtml(request.subject || "-")}</strong>
+        <strong>${escapeHtml(previewSubject)}</strong>
         <div class="review-target-meta">
           <span>Estrategia: ${escapeHtml(request.strategy === "context" ? "Contexto da turma" : "Usuarios")}</span>
           <span>Deduplicar: ${request.dedupe ? "Sim" : "Nao"}</span>
           <span>Modo teste: ${request.dry_run ? "Sim" : "Nao"}</span>
           <span>Anexo: ${escapeHtml(request.attachment_name || "Sem anexo")}</span>
+          <span>${sampleCourse ? `Amostra: ${escapeHtml(sampleCourse.course_name || sampleCourse.course_ref || "-")}` : "Sem turma para amostra"}</span>
         </div>
       </div>
-      <div class="message-block"><pre>${escapeHtml(request.message || "")}</pre></div>
+      <div class="message-block"><pre>${escapeHtml(previewBody)}</pre></div>
     `;
   }
 
@@ -1405,6 +1500,7 @@ function renderTargetControls(kind, options = {}) {
   if (kind === "message") {
     renderMessageInfoPanel();
   }
+  updateTemplatePreviewsForKind(kind);
 }
 
 function renderPickers(options = {}) {
@@ -1544,6 +1640,7 @@ function togglePickerValue(pickerId, value, checked, options = {}) {
     if (target.kind === "message") {
       renderMessageInfoPanel();
     }
+    updateTemplatePreviewsForKind(target.kind);
     persistUiState();
     if (!options.deferRender) {
       renderTargetControls(target.kind, { preservePickerId: pickerId });
@@ -1835,6 +1932,157 @@ function engagementPreviewColumns() {
   ];
 }
 
+const TEMPLATE_SCOPE_CONFIG = {
+  announcement: {
+    fields: [
+      { id: "announcementTitle", label: "Titulo" },
+      { id: "announcementMessage", label: "Mensagem" },
+    ],
+    tokens: [
+      { token: "{{course_name}}", label: "Nome da disciplina" },
+      { token: "{{course_ref}}", label: "Numero do curso" },
+      { token: "{{course_code}}", label: "Codigo da disciplina" },
+    ],
+  },
+  recurrence: {
+    fields: [
+      { id: "recurrenceTitle", label: "Titulo do aviso" },
+      { id: "recurrenceMessage", label: "Mensagem" },
+    ],
+    tokens: [
+      { token: "{{course_name}}", label: "Nome da disciplina" },
+      { token: "{{course_ref}}", label: "Numero do curso" },
+      { token: "{{course_code}}", label: "Codigo da disciplina" },
+    ],
+  },
+  message: {
+    fields: [
+      { id: "messageSubject", label: "Assunto" },
+      { id: "messageBody", label: "Mensagem" },
+    ],
+    tokens: [
+      { token: "{{course_name}}", label: "Nome da disciplina" },
+      { token: "{{course_ref}}", label: "Numero do curso" },
+      { token: "{{course_code}}", label: "Codigo da disciplina" },
+    ],
+  },
+};
+
+function renderTemplateAssistants() {
+  ["announcement", "recurrence", "message"].forEach((scope) => {
+    renderTokenPalette(scope);
+    renderTemplateStatus(scope);
+  });
+}
+
+function renderTokenPalette(scope) {
+  const container = $(`#${scope}TokenPalette`);
+  const config = TEMPLATE_SCOPE_CONFIG[scope];
+  if (!container || !config) return;
+  container.innerHTML = config.tokens.map((item) => `
+    <button
+      class="token-chip"
+      type="button"
+      draggable="true"
+      data-template-scope="${escapeHtml(scope)}"
+      data-template-token="${escapeHtml(item.token)}"
+      title="Clique ou arraste para inserir"
+    >
+      <span>${escapeHtml(item.token)}</span>
+      <small>${escapeHtml(item.label)}</small>
+    </button>
+  `).join("");
+}
+
+function renderTemplateStatus(scope) {
+  const container = $(`#${scope}TemplateStatus`);
+  const config = TEMPLATE_SCOPE_CONFIG[scope];
+  if (!container || !config) return;
+  const allowedTokens = new Set(config.tokens.map((item) => item.token));
+  const rows = config.fields.map((field) => {
+    const value = $(`#${field.id}`)?.value || "";
+    const tokens = extractTemplateTokens(value);
+    const invalid = tokens.filter((token) => !allowedTokens.has(token));
+    const valid = tokens.filter((token) => allowedTokens.has(token));
+    const stateLine = invalid.length
+      ? `<div class="template-status-help text-danger">Variaveis invalidas bloqueiam o envio.</div>`
+      : `<div class="template-status-help">${tokens.length ? "Variaveis reconhecidas com sucesso." : "Nenhuma variavel usada neste campo."}</div>`;
+    const pills = [
+      ...valid.map((token) => `<span class="template-token-pill valid">${escapeHtml(token)}</span>`),
+      ...invalid.map((token) => `<span class="template-token-pill invalid">${escapeHtml(token)}</span>`),
+    ];
+    return `
+      <div class="template-status-row">
+        <strong>${escapeHtml(field.label)}</strong>
+        ${stateLine}
+        <div class="template-token-list">
+          ${pills.length ? pills.join("") : `<span class="template-token-pill empty">Sem variaveis</span>`}
+        </div>
+      </div>
+    `;
+  });
+  container.innerHTML = `<div class="template-status-grid">${rows.join("")}</div>`;
+}
+
+function extractTemplateTokens(text) {
+  const matches = String(text || "").match(/{{\s*[a-zA-Z0-9_]+\s*}}/g) || [];
+  return unique(matches.map((token) => token.replace(/\s+/g, "")));
+}
+
+function hasInvalidTemplateTokens(scope) {
+  const config = TEMPLATE_SCOPE_CONFIG[scope];
+  if (!config) return false;
+  const allowedTokens = new Set(config.tokens.map((item) => item.token));
+  return config.fields.some((field) => {
+    const value = $(`#${field.id}`)?.value || "";
+    return extractTemplateTokens(value).some((token) => !allowedTokens.has(token));
+  });
+}
+
+function insertTemplateToken(scope, token) {
+  const config = TEMPLATE_SCOPE_CONFIG[scope];
+  if (!config) return;
+  const activeField = state.templateFocusFieldId ? document.getElementById(state.templateFocusFieldId) : null;
+  const targetField = activeField?.dataset?.templateScope === scope
+    ? activeField
+    : document.getElementById(config.fields[config.fields.length - 1].id);
+  if (!targetField) return;
+  insertTextAtCursor(targetField, token);
+  targetField.focus();
+  handleTemplateFieldChanged(scope);
+}
+
+function insertTextAtCursor(element, text) {
+  const start = typeof element.selectionStart === "number" ? element.selectionStart : element.value.length;
+  const end = typeof element.selectionEnd === "number" ? element.selectionEnd : element.value.length;
+  const value = element.value || "";
+  element.value = `${value.slice(0, start)}${text}${value.slice(end)}`;
+  const nextCaret = start + text.length;
+  if (typeof element.setSelectionRange === "function") {
+    element.setSelectionRange(nextCaret, nextCaret);
+  }
+}
+
+function handleTemplateFieldChanged(scope) {
+  renderTemplateStatus(scope);
+  updateTemplatePreviewsForKind(scope);
+  persistUiState();
+}
+
+function updateTemplatePreviewsForKind(kind) {
+  if (kind === "announcement") {
+    updateAnnouncementPreview();
+    return;
+  }
+  if (kind === "message") {
+    updateMessagePreview();
+    return;
+  }
+  if (kind === "recurrence") {
+    updateRecurrenceSamplePreview();
+  }
+}
+
 function collectEngagementCriteriaConfig() {
   return {
     match_mode: $("#engagementMatchMode").value,
@@ -1874,6 +2122,11 @@ function buildAnnouncementRequestBody() {
 
 function validateAnnouncementForm() {
   if (!ensureConnectionConfigured() || !ensureTargetSelection("announcement")) return false;
+  if (hasInvalidTemplateTokens("announcement")) {
+    showNotice("Existem variaveis invalidas no comunicado. Use apenas os blocos reconhecidos.", "error");
+    focusField("#announcementTitle");
+    return false;
+  }
   if (!$("#announcementTitle").value.trim()) {
     markInvalid("#announcementTitle");
     focusField("#announcementTitle");
@@ -1909,6 +2162,11 @@ function buildEngagementRequestBody() {
 
 function validateMessageForm() {
   if (!ensureConnectionConfigured() || !ensureTargetSelection("message")) return false;
+  if (hasInvalidTemplateTokens("message")) {
+    showNotice("Existem variaveis invalidas na caixa de entrada. Use apenas os blocos reconhecidos.", "error");
+    focusField("#messageSubject");
+    return false;
+  }
   if (!$("#messageSubject").value.trim()) {
     markInvalid("#messageSubject");
     focusField("#messageSubject");
@@ -1949,6 +2207,11 @@ function validateEngagementForm() {
 
 function validateRecurrenceForm() {
   if (!ensureConnectionConfigured() || !ensureTargetSelection("recurrence")) return false;
+  if (hasInvalidTemplateTokens("recurrence")) {
+    showNotice("Existem variaveis invalidas na recorrencia. Use apenas os blocos reconhecidos.", "error");
+    focusField("#recurrenceTitle");
+    return false;
+  }
   if (!$("#recurrenceTitle").value.trim()) {
     markInvalid("#recurrenceTitle");
     focusField("#recurrenceTitle");
@@ -2048,7 +2311,59 @@ function toggleScheduleField() {
 
 function updateAnnouncementPreview() {
   const previewCourse = firstTargetCourse("announcement");
+  const titlePreview = $("#announcementPreviewTitle");
+  const renderedTitle = renderCourseTemplate($("#announcementTitle").value.trim() || "Titulo do comunicado", previewCourse);
+  if (titlePreview) {
+    titlePreview.textContent = previewCourse
+      ? `${renderedTitle} | amostra com ${previewCourse.course_name || previewCourse.course_ref}`
+      : "Selecione uma turma para gerar a amostra do comunicado.";
+  }
   $("#announcementPreview").srcdoc = renderCourseTemplate($("#announcementMessage").value.trim() || "<p></p>", previewCourse) || "<p></p>";
+  renderTemplateStatus("announcement");
+}
+
+function updateMessagePreview() {
+  const preview = $("#messagePreviewPanel");
+  if (!preview) return;
+  const previewCourse = firstTargetCourse("message");
+  renderTemplateStatus("message");
+  if (!previewCourse) {
+    preview.classList.add("empty-state");
+    preview.innerHTML = "Selecione uma turma para gerar a amostra da caixa de entrada.";
+    return;
+  }
+  preview.classList.remove("empty-state");
+  const renderedSubject = renderCourseTemplate($("#messageSubject").value.trim() || "Assunto da mensagem", previewCourse);
+  const renderedBody = escapeHtml(renderCourseTemplate($("#messageBody").value.trim() || "Mensagem da caixa de entrada.", previewCourse)).replaceAll("\n", "<br>");
+  preview.innerHTML = `
+    <div class="message-preview-block">
+      <strong>${escapeHtml(renderedSubject)}</strong>
+      <div class="compact-meta">Amostra com ${escapeHtml(previewCourse.course_name || previewCourse.course_ref || "-")}</div>
+    </div>
+    <div class="message-preview-block message-preview-html">${renderedBody}</div>
+  `;
+}
+
+function updateRecurrenceSamplePreview() {
+  const preview = $("#recurrenceMessagePreview");
+  if (!preview) return;
+  const previewCourse = firstTargetCourse("recurrence");
+  renderTemplateStatus("recurrence");
+  if (!previewCourse) {
+    preview.classList.add("empty-state");
+    preview.innerHTML = "Selecione as turmas para gerar a amostra da recorrencia.";
+    return;
+  }
+  preview.classList.remove("empty-state");
+  const renderedTitle = renderCourseTemplate($("#recurrenceTitle").value.trim() || "Titulo da recorrencia", previewCourse);
+  const renderedBody = renderCourseTemplate($("#recurrenceMessage").value.trim() || "<p></p>", previewCourse);
+  preview.innerHTML = `
+    <div class="message-preview-block">
+      <strong>${escapeHtml(renderedTitle)}</strong>
+      <div class="compact-meta">Amostra com ${escapeHtml(previewCourse.course_name || previewCourse.course_ref || "-")}</div>
+    </div>
+    <div class="message-preview-block message-preview-html">${renderedBody}</div>
+  `;
 }
 
 function updateAttachmentMeta(event) {
@@ -2094,7 +2409,7 @@ function renderCourseTemplate(template, course) {
   };
   let rendered = String(template || "");
   Object.entries(context).forEach(([key, value]) => {
-    rendered = rendered.replaceAll(`{{${key}}}`, String(value || ""));
+    rendered = rendered.replace(new RegExp(`{{\\s*${key}\\s*}}`, "g"), String(value || ""));
   });
   return rendered;
 }

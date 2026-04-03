@@ -333,6 +333,159 @@ code,
   gap: 6px;
 }
 
+.template-tools,
+.template-status,
+.message-preview-panel {
+  display: grid;
+  gap: 10px;
+}
+
+.template-tools {
+  padding: 10px 12px;
+  border: 1px dashed rgba(88, 168, 255, 0.22);
+  border-radius: var(--radius-md);
+  background: rgba(16, 24, 34, 0.78);
+}
+
+.template-tool-head {
+  display: grid;
+  gap: 4px;
+}
+
+.template-tool-head strong {
+  font-size: 0.84rem;
+}
+
+.template-tool-head p,
+.template-preview-headline,
+.template-status-help {
+  color: var(--muted);
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+
+.token-palette {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.token-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(88, 168, 255, 0.28);
+  background: rgba(22, 34, 48, 0.96);
+  color: #d9ecff;
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: grab;
+  user-select: none;
+}
+
+.token-chip:active {
+  cursor: grabbing;
+}
+
+.token-chip small {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+.template-target-active {
+  border-color: rgba(88, 168, 255, 0.68) !important;
+  box-shadow: 0 0 0 2px rgba(88, 168, 255, 0.12) !important;
+}
+
+.template-target-dragover {
+  border-color: rgba(56, 187, 130, 0.52) !important;
+  box-shadow: 0 0 0 2px rgba(56, 187, 130, 0.14) !important;
+}
+
+.template-status {
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--panel-2);
+}
+
+.template-status-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.template-status-row {
+  display: grid;
+  gap: 6px;
+}
+
+.template-status-row strong {
+  font-size: 0.82rem;
+}
+
+.template-token-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.template-token-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: rgba(13, 19, 31, 0.92);
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.template-token-pill.valid {
+  color: #bfe3ff;
+  border-color: rgba(88, 168, 255, 0.28);
+}
+
+.template-token-pill.invalid {
+  color: #ffd1d1;
+  border-color: rgba(225, 90, 90, 0.34);
+  background: rgba(225, 90, 90, 0.1);
+}
+
+.template-token-pill.empty {
+  color: var(--muted);
+}
+
+.message-preview-panel {
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--panel-2);
+}
+
+.message-preview-block {
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: rgba(13, 19, 31, 0.72);
+}
+
+.message-preview-block strong {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.message-preview-html {
+  color: var(--text);
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
 .field span {
   font-size: 0.86rem;
   font-weight: 600;

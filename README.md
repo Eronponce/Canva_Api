@@ -11,6 +11,7 @@ Painel web local para operar em lote no Canvas LMS usando apenas endpoints ofici
 - publica comunicados em lote com anexo opcional
 - cria recorrencias de avisos no proprio Canvas
 - permite placeholders por disciplina em comunicados e avisos recorrentes (`{{course_name}}`, `{{course_ref}}`, `{{course_code}}`)
+- valida placeholders com blocos arrastaveis em comunicados, recorrencia e caixa de entrada
 - envia mensagens pela caixa de entrada do Canvas em lote com anexo opcional
 - envia mensagens para alunos inativos com base em analytics e progresso de modulos
 - prioriza turmas e alunos inativos por nivel de risco no preview antes do envio
@@ -31,7 +32,7 @@ Painel web local para operar em lote no Canvas LMS usando apenas endpoints ofici
 4. `Recorrencia`
    cria varios avisos futuros no Canvas de uma vez
 5. `Caixa de entrada`
-   mensagens em lote por grupos salvos ou cursos especificos, com anexo opcional
+   mensagens em lote por grupos salvos ou cursos especificos, com anexo opcional e preview
 6. `Inativos`
    mensagem para alunos sem acesso nenhum ou com recursos pendentes
 7. `Configuracoes`
@@ -54,6 +55,21 @@ Isso vale para:
 - `Comunicados`
 - `Caixa de entrada`
 - `Inativos`
+
+## Blocos de variaveis
+
+Nos modulos `Comunicados`, `Recorrencia` e `Caixa de entrada` existe uma barra de variaveis seguras.
+
+- clique ou arraste os blocos para inserir placeholders
+- o sistema valida automaticamente se as variaveis usadas sao reconhecidas
+- variaveis invalidas bloqueiam o envio
+- a interface mostra uma amostra com a primeira turma selecionada
+
+Variaveis suportadas:
+
+- `{{course_name}}`
+- `{{course_ref}}`
+- `{{course_code}}`
 
 ## Como funciona a Recorrencia
 
@@ -303,6 +319,15 @@ python app.py
 .\panel.bat restart
 .\panel.bat status
 ```
+
+Ao abrir `.\panel.bat` sem argumentos, o sistema agora mostra um mini launcher com botoes para:
+
+- iniciar
+- parar
+- reiniciar
+- checar status
+- abrir o painel
+- abrir logs
 
 ### No PowerShell
 

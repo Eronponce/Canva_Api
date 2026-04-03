@@ -305,3 +305,31 @@ def test_message_job_uploads_attachment_once_and_reuses_ids(app, monkeypatch, tm
     assert len(fake_client.uploaded_attachments) == 1
     assert fake_client.conversations_created[0]["attachment_ids"] == [3210]
     assert attachment_path.exists() is False
+
+
+def test_message_job_renders_course_placeholders(app, monkeypatch):
+    services = app.extensions["services"]
+    fake_client = FakeCanvasClient()
+    monkeypatch.setattr(services["connection_service"], "build_client", lambda payload: fake_client)
+
+    job_manager = services["job_manager"]
+    service = services["message_service"]
+    job = job_manager.create_job(kind="message", title="Mensagem com placeholders")
+
+    service.run_job(
+        job["id"],
+        {
+            "base_url": "https://canvas.example.com",
+            "access_token": "token",
+            "course_ids_text": "101",
+            "subject": "Aviso - {{course_name}}",
+            "message": "Curso {{course_code}} / {{course_ref}} / {{course_name}}",
+            "strategy": "users",
+            "dedupe": False,
+            "dry_run": False,
+        },
+    )
+
+    created = fake_client.conversations_created[0]
+    assert created["subject"] == "Aviso - Cálculo I"
+    assert created["body"] == "Curso MAT101 / 101 / Cálculo I"
