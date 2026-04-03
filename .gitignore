@@ -7,4 +7,14 @@ __pycache__/
 venv/
 build/
 dist/
-logs/app.log
+.pytest_cache/
+logs/*.log
+logs/*.pid
+logs/server.stdout.log
+logs/server.stderr.log
+logs/server.pid
+!logs/.gitkeep
+data/*.json
+data/*.db
+data/reports/*.csv
+!data/reports/.gitkeep

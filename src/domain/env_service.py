@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime
+
 
 class EnvService:
     def __init__(self, app_config):
@@ -16,6 +18,13 @@ class EnvService:
 
     def save_env(self, content: str) -> dict:
         self.app_config.env_file.parent.mkdir(parents=True, exist_ok=True)
+        if self.app_config.env_file.exists():
+            backup_suffix = datetime.now().strftime("%Y%m%d-%H%M%S")
+            backup_file = self.app_config.env_file.with_name(f"{self.app_config.env_file.name}.{backup_suffix}.bak")
+            backup_file.write_text(
+                self.app_config.env_file.read_text(encoding="utf-8"),
+                encoding="utf-8",
+            )
         self.app_config.env_file.write_text(content or "", encoding="utf-8")
         self.app_config.refresh_from_environment()
         return self.read_env()

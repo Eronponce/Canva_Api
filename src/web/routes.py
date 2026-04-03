@@ -24,6 +24,24 @@ def _with_resolved_courses(payload: dict, empty_message: str) -> tuple[dict, lis
     return hydrated_payload, course_refs
 
 
+def _include_inactive() -> bool:
+    return str(request.args.get("include_inactive", "")).strip().lower() in {"1", "true", "yes"}
+
+
+def _job_group_ids(raw_payload: dict) -> list[str]:
+    course_service = services()["course_service"]
+    if bool(raw_payload.get("select_all_groups")):
+        return [item["id"] for item in course_service.list_groups()["items"]]
+    return [str(item).strip() for item in (raw_payload.get("group_ids") or []) if str(item).strip()]
+
+
+def _safe_request_payload(payload: dict) -> dict:
+    sanitized = dict(payload)
+    sanitized.pop("access_token", None)
+    sanitized.pop("api_token", None)
+    return sanitized
+
+
 @web.get("/")
 def index():
     return render_template("index.html")
@@ -65,7 +83,7 @@ def course_catalog():
 
 @web.get("/api/registered-courses")
 def list_registered_courses():
-    return jsonify(services()["course_service"].list_registered_courses())
+    return jsonify(services()["course_service"].list_registered_courses(include_inactive=_include_inactive()))
 
 
 @web.post("/api/registered-courses")
@@ -75,20 +93,33 @@ def create_registered_course():
     return jsonify(result), 201
 
 
+@web.post("/api/registered-courses/bulk")
+def create_registered_courses_bulk():
+    payload = request.get_json(silent=True) or {}
+    result = services()["course_service"].add_registered_courses(payload)
+    return jsonify(result), 201
+
+
 @web.delete("/api/registered-courses/<path:course_ref>")
 def delete_registered_course(course_ref: str):
     result = services()["course_service"].delete_registered_course(course_ref)
     return jsonify(result)
 
 
+@web.patch("/api/registered-courses/<path:course_ref>/reactivate")
+def reactivate_registered_course(course_ref: str):
+    result = services()["course_service"].reactivate_registered_course(course_ref)
+    return jsonify(result)
+
+
 @web.get("/api/groups")
 def list_groups():
-    return jsonify(services()["course_service"].list_groups())
+    return jsonify(services()["course_service"].list_groups(include_inactive=_include_inactive()))
 
 
 @web.get("/api/groups/<group_id>")
 def get_group(group_id: str):
-    return jsonify(services()["course_service"].get_group(group_id))
+    return jsonify(services()["course_service"].get_group(group_id, include_inactive=_include_inactive()))
 
 
 @web.post("/api/groups")
@@ -111,6 +142,12 @@ def delete_group(group_id: str):
     return jsonify(result)
 
 
+@web.patch("/api/groups/<group_id>/reactivate")
+def reactivate_group(group_id: str):
+    result = services()["course_service"].reactivate_group(group_id)
+    return jsonify(result)
+
+
 @web.get("/api/settings/env")
 def read_env_file():
     return jsonify(services()["env_service"].read_env())
@@ -123,6 +160,23 @@ def save_env_file():
     return jsonify(result)
 
 
+@web.post("/api/settings/database/wipe")
+def wipe_database():
+    payload = request.get_json(silent=True) or {}
+    confirmation_text = str(payload.get("confirmation_text") or "").strip().upper()
+    if confirmation_text != "EXCLUIR":
+        raise ValueError("Digite EXCLUIR para confirmar a limpeza total do banco.")
+
+    deleted_counts = services()["database_admin_repository"].wipe_all_data()
+    return jsonify(
+        {
+            "ok": True,
+            "message": "Banco limpo com sucesso.",
+            "deleted_counts": deleted_counts,
+        }
+    )
+
+
 @web.post("/api/announcements/jobs")
 def create_announcement_job():
     raw_payload = request.get_json(silent=True) or {}
@@ -130,14 +184,19 @@ def create_announcement_job():
         raw_payload,
         "Selecione ao menos um grupo ou curso para publicar o comunicado.",
     )
+    credentials = services()["connection_service"].resolve_credentials(raw_payload)
     title = (payload.get("title") or "Comunicado em lote").strip()
     job_manager = services()["job_manager"]
     job = job_manager.create_job(
         kind="announcement",
         title=title,
+        base_url=credentials["base_url"],
+        request_payload=_safe_request_payload(payload),
+        request_token_source="inline" if (raw_payload.get("access_token") or raw_payload.get("api_token")) else services()["connection_service"].app_config.default_token_source,
+        dry_run=bool(payload.get("dry_run")),
         summary={
             "course_refs": course_refs,
-            "group_ids": raw_payload.get("group_ids", []),
+            "group_ids": _job_group_ids(raw_payload),
             "select_all_groups": bool(raw_payload.get("select_all_groups")),
         },
     )
@@ -156,14 +215,21 @@ def create_message_job():
         raw_payload,
         "Selecione ao menos um grupo ou curso para enviar as mensagens.",
     )
+    credentials = services()["connection_service"].resolve_credentials(raw_payload)
     title = (payload.get("subject") or "Mensagem em lote").strip()
     job_manager = services()["job_manager"]
     job = job_manager.create_job(
         kind="message",
         title=title,
+        base_url=credentials["base_url"],
+        request_payload=_safe_request_payload(payload),
+        request_token_source="inline" if (raw_payload.get("access_token") or raw_payload.get("api_token")) else services()["connection_service"].app_config.default_token_source,
+        requested_strategy=(payload.get("strategy") or "users"),
+        dry_run=bool(payload.get("dry_run")),
+        dedupe=bool(payload.get("dedupe")),
         summary={
             "course_refs": course_refs,
-            "group_ids": raw_payload.get("group_ids", []),
+            "group_ids": _job_group_ids(raw_payload),
             "select_all_groups": bool(raw_payload.get("select_all_groups")),
         },
     )
@@ -198,6 +264,17 @@ def get_job(job_id: str):
 def list_history():
     history = services()["job_manager"].list_history()
     return jsonify({"items": history})
+
+
+@web.get("/api/reports/analytics")
+def analytics_report():
+    raw_days = str(request.args.get("days", "30")).strip()
+    try:
+        days = max(int(raw_days), 1)
+    except ValueError as exc:
+        raise ValueError("Informe um periodo valido em dias para os relatorios.") from exc
+    report = services()["report_repository"].analytics(days=days)
+    return jsonify(report)
 
 
 @web.get("/api/history/<job_id>")
