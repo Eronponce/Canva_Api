@@ -594,6 +594,116 @@ textarea {
   grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
 }
 
+.executive-alerts-grid,
+.executive-highlights-grid {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.executive-alerts-grid {
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}
+
+.executive-highlights-grid {
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+}
+
+.executive-alert,
+.executive-highlight {
+  min-width: 0;
+  padding: 12px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+}
+
+.executive-alert {
+  display: grid;
+  gap: 8px;
+}
+
+.executive-alert-head {
+  display: grid;
+  gap: 4px;
+}
+
+.executive-alert-level {
+  display: inline-flex;
+  width: fit-content;
+  align-items: center;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.executive-alert p,
+.executive-alert small,
+.executive-highlight small {
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.executive-alert.error {
+  border-color: rgba(225, 90, 90, 0.28);
+  background: rgba(225, 90, 90, 0.08);
+}
+
+.executive-alert.error .executive-alert-level {
+  color: #ffcdcd;
+  border-color: rgba(225, 90, 90, 0.35);
+}
+
+.executive-alert.warning {
+  border-color: rgba(213, 164, 71, 0.28);
+  background: rgba(213, 164, 71, 0.08);
+}
+
+.executive-alert.warning .executive-alert-level {
+  color: #f1d18f;
+  border-color: rgba(213, 164, 71, 0.35);
+}
+
+.executive-alert.info,
+.executive-highlight.info {
+  border-color: rgba(88, 168, 255, 0.2);
+}
+
+.executive-alert.info .executive-alert-level {
+  color: #bddcff;
+  border-color: rgba(88, 168, 255, 0.3);
+}
+
+.executive-alert.success,
+.executive-highlight.success {
+  border-color: rgba(56, 187, 130, 0.24);
+}
+
+.executive-alert.success .executive-alert-level {
+  color: #9be1bf;
+  border-color: rgba(56, 187, 130, 0.35);
+}
+
+.executive-highlight {
+  display: grid;
+  gap: 4px;
+}
+
+.executive-highlight span {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.executive-highlight strong {
+  font-size: 0.95rem;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
 .summary-card,
 .overview-card {
   min-width: 0;

@@ -531,6 +531,10 @@ def test_reports_analytics_endpoint_returns_collapsible_sections_shape(app):
     assert payload["overview"]["comparison"]["total_jobs"]["delta"] == 1
     assert payload["overview"]["comparison"]["total_recipients_sent"]["current"] == 11
     assert payload["overview"]["comparison"]["total_announcements_created"]["previous"] == 1
+    assert "executive" in payload
+    assert payload["executive"]["alerts"]
+    assert payload["executive"]["highlights"]
+    assert any(item["level"] in {"warning", "error"} for item in payload["executive"]["alerts"])
     assert "period_comparison" in payload["sections"]
     assert "operational" in payload["sections"]
     assert "top_courses" in payload["sections"]

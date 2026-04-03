@@ -810,6 +810,12 @@ class ReportRepository:
 
         return {
             "overview": overview,
+            "executive": self._build_executive_summary(
+                overview=overview,
+                current_stats=current_stats,
+                previous_stats=previous_stats,
+                upcoming_recurrence_items=upcoming_recurrence_items,
+            ),
             "sections": {
                 "period_comparison": {"title": "Comparativo do periodo", "items": self._period_comparison_items(overview)},
                 "operational": {"title": "Operacional por tipo", "items": self._kind_comparison_items(current_stats["by_kind"], previous_stats["by_kind"])},
@@ -820,6 +826,157 @@ class ReportRepository:
                 "upcoming_recurrences": {"title": "Recorrencias ativas", "items": upcoming_recurrence_items},
                 "recent_failures": {"title": "Falhas recentes", "items": current_stats["recent_failures"][:15]},
             },
+        }
+
+    def _build_executive_summary(
+        self,
+        *,
+        overview: dict,
+        current_stats: dict,
+        previous_stats: dict,
+        upcoming_recurrence_items: list[dict],
+    ) -> dict:
+        comparison = overview.get("comparison", {})
+        alerts: list[dict] = []
+
+        failed_jobs_cmp = comparison.get("failed_jobs", {})
+        success_rate_cmp = comparison.get("success_rate", {})
+        recipients_cmp = comparison.get("total_recipients_sent", {})
+
+        if overview.get("failed_jobs", 0) > 0:
+            level = "error" if failed_jobs_cmp.get("delta", 0) > 0 else "warning"
+            alerts.append(
+                {
+                    "level": level,
+                    "title": "Falhas operacionais no periodo",
+                    "message": (
+                        f"{overview.get('failed_jobs', 0)} lote(s) falharam na janela atual "
+                        f"contra {int(failed_jobs_cmp.get('previous', 0))} no periodo anterior."
+                    ),
+                    "action": "Revise a secao 'Falhas recentes' e os cursos com maior concentracao de erro.",
+                }
+            )
+        elif failed_jobs_cmp.get("previous", 0) > 0 and overview.get("failed_jobs", 0) == 0:
+            alerts.append(
+                {
+                    "level": "success",
+                    "title": "Recuperacao de estabilidade",
+                    "message": "Nao houve falhas no periodo atual, mesmo com falhas registradas na janela anterior.",
+                    "action": "Mantenha os mesmos grupos, cursos e estrategias que estabilizaram a operacao.",
+                }
+            )
+
+        if overview.get("success_rate", 0) < 85 or success_rate_cmp.get("delta", 0) < -5:
+            alerts.append(
+                {
+                    "level": "warning",
+                    "title": "Taxa de sucesso abaixo do ideal",
+                    "message": (
+                        f"Taxa atual de {overview.get('success_rate', 0)}% "
+                        f"contra {success_rate_cmp.get('previous', 0)}% no periodo anterior."
+                    ),
+                    "action": "Use o pre-envio e revise credenciais, turmas e anexos antes dos proximos disparos.",
+                }
+            )
+
+        if overview.get("total_jobs", 0) == 0:
+            alerts.append(
+                {
+                    "level": "info",
+                    "title": "Sem atividade operacional",
+                    "message": "Nenhum lote foi registrado na janela atual.",
+                    "action": "Ajuste o periodo ou execute um lote para iniciar a leitura comparativa.",
+                }
+            )
+        elif recipients_cmp.get("delta", 0) > 0 and overview.get("success_rate", 0) >= 90:
+            alerts.append(
+                {
+                    "level": "success",
+                    "title": "Volume cresceu com boa estabilidade",
+                    "message": (
+                        f"Foram {overview.get('total_recipients_sent', 0)} destinatarios no periodo atual, "
+                        f"com delta de {int(recipients_cmp.get('delta', 0))} frente ao anterior."
+                    ),
+                    "action": "Bom momento para ampliar grupos e rotinas recorrentes sem perder controle operacional.",
+                }
+            )
+
+        top_failure_course = next(
+            (
+                item
+                for item in self._course_comparison_items(current_stats["top_courses"], previous_stats["top_courses"])
+                if item.get("current_failure", 0) > 0
+            ),
+            None,
+        )
+        if top_failure_course:
+            alerts.append(
+                {
+                    "level": "warning",
+                    "title": "Curso com falhas concentradas",
+                    "message": (
+                        f"{top_failure_course.get('course_name') or top_failure_course.get('course_ref')} "
+                        f"registrou {top_failure_course.get('current_failure', 0)} falha(s) no periodo atual."
+                    ),
+                    "action": "Priorize este curso no proximo teste de envio ou no diagnostico de permissao/acesso.",
+                }
+            )
+
+        next_recurrence = self._next_upcoming_recurrence(upcoming_recurrence_items)
+        if next_recurrence:
+            alerts.append(
+                {
+                    "level": "info",
+                    "title": "Recorrencia proxima de disparar",
+                    "message": (
+                        f"{next_recurrence.get('name') or 'Recorrencia'} tem publicacao prevista em "
+                        f"{datetime_to_iso(next_recurrence.get('first_publish_at')) if isinstance(next_recurrence.get('first_publish_at'), datetime) else next_recurrence.get('first_publish_at') or '-'}."
+                    ),
+                    "action": "Revise o curso e a mensagem caso o calendario da disciplina tenha mudado.",
+                }
+            )
+
+        top_course = self._top_course_highlight(current_stats["top_courses"])
+        top_group = self._top_group_highlight(current_stats["top_groups"])
+        highlights = []
+        if top_course:
+            highlights.append(top_course)
+        if top_group:
+            highlights.append(top_group)
+        if top_failure_course:
+            highlights.append(
+                {
+                    "label": "Maior foco de erro",
+                    "value": top_failure_course.get("course_name") or top_failure_course.get("course_ref") or "-",
+                    "helper": (
+                        f"{top_failure_course.get('current_failure', 0)} falha(s) agora | "
+                        f"{top_failure_course.get('previous_failure', 0)} antes"
+                    ),
+                    "tone": "warning",
+                }
+            )
+        if next_recurrence:
+            highlights.append(
+                {
+                    "label": "Proxima recorrencia",
+                    "value": next_recurrence.get("name") or "-",
+                    "helper": format_datetime_short(next_recurrence.get("first_publish_at")),
+                    "tone": "info",
+                }
+            )
+        if not highlights:
+            highlights.append(
+                {
+                    "label": "Painel estavel",
+                    "value": "Sem destaques criticos",
+                    "helper": "Use os filtros do periodo para aprofundar a leitura.",
+                    "tone": "success",
+                }
+            )
+
+        return {
+            "alerts": alerts[:5],
+            "highlights": highlights[:4],
         }
 
     def _collect_job_stats(self, jobs: list[JobRun]) -> dict:
@@ -1018,6 +1175,55 @@ class ReportRepository:
                 }
             )
         return sorted(items, key=lambda item: (item["current_jobs"], item["previous_jobs"]), reverse=True)[:10]
+
+    @staticmethod
+    def _top_course_highlight(current_map: dict) -> dict | None:
+        if not current_map:
+            return None
+        key, item = max(
+            current_map.items(),
+            key=lambda pair: (pair[1].get("runs", 0), pair[1].get("recipients_sent", 0)),
+        )
+        return {
+            "label": "Curso mais acionado",
+            "value": item.get("course_name") or key,
+            "helper": f"{item.get('runs', 0)} execucao(oes) | {item.get('recipients_sent', 0)} mensagens",
+            "tone": "info",
+        }
+
+    @staticmethod
+    def _top_group_highlight(current_map: dict) -> dict | None:
+        if not current_map:
+            return None
+        key, item = max(current_map.items(), key=lambda pair: pair[1].get("jobs", 0))
+        return {
+            "label": "Grupo mais usado",
+            "value": item.get("group_name") or key,
+            "helper": f"{item.get('jobs', 0)} lote(s) no periodo",
+            "tone": "info",
+        }
+
+    @staticmethod
+    def _next_upcoming_recurrence(upcoming_items: list[dict]) -> dict | None:
+        sorted_items = sorted(
+            [item for item in upcoming_items if item.get("first_publish_at")],
+            key=lambda item: item.get("first_publish_at") or "",
+        )
+        return sorted_items[0] if sorted_items else None
+
+
+def format_datetime_short(value) -> str:
+    if not value:
+        return "-"
+    if isinstance(value, datetime):
+        resolved = _as_utc(value)
+        return resolved.strftime("%d/%m %H:%M") if resolved else "-"
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return str(value)
+    resolved = _as_utc(parsed)
+    return resolved.strftime("%d/%m %H:%M") if resolved else "-"
 
 
 class AnnouncementRecurrenceRepository:

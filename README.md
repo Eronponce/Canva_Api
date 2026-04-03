@@ -14,6 +14,7 @@ Painel web local para operar em lote no Canvas LMS usando apenas endpoints ofici
 - envia mensagens para alunos inativos com base em analytics e progresso de modulos
 - revisa o alvo antes do envio em comunicados, caixa de entrada e inativos
 - compara periodo atual vs periodo anterior equivalente nos relatorios
+- gera alertas executivos e destaques operacionais na aba de relatorios
 - registra historico, resultados por turma e exportacao em CSV
 - permite limpar todo o banco local com confirmacao digitada
 

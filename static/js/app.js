@@ -2328,10 +2328,43 @@ function renderJobLayout(job, columns) {
 }
 
 function renderReports() {
+  renderExecutiveSummary();
   renderReportMetrics();
   renderReportAnalytics();
   renderHistoryList();
   renderReportDetail();
+}
+
+function renderExecutiveSummary() {
+  const executive = state.reportAnalytics?.executive || {};
+  const alerts = executive.alerts || [];
+  const highlights = executive.highlights || [];
+  const alertsContainer = $("#reportExecutiveAlerts");
+  const highlightsContainer = $("#reportExecutiveHighlights");
+  if (!alertsContainer || !highlightsContainer) return;
+
+  alertsContainer.innerHTML = alerts.length
+    ? alerts.map((item) => `
+      <article class="executive-alert ${escapeHtml(item.level || "info")}">
+        <div class="executive-alert-head">
+          <span class="executive-alert-level">${escapeHtml(alertLabel(item.level))}</span>
+          <strong>${escapeHtml(item.title || "Alerta")}</strong>
+        </div>
+        <p>${escapeHtml(item.message || "-")}</p>
+        <small>${escapeHtml(item.action || "")}</small>
+      </article>
+    `).join("")
+    : `<div class="empty-state">Nenhum alerta executivo para o periodo atual.</div>`;
+
+  highlightsContainer.innerHTML = highlights.length
+    ? highlights.map((item) => `
+      <article class="executive-highlight ${escapeHtml(item.tone || "info")}">
+        <span>${escapeHtml(item.label || "Destaque")}</span>
+        <strong>${escapeHtml(item.value || "-")}</strong>
+        <small>${escapeHtml(item.helper || "")}</small>
+      </article>
+    `).join("")
+    : "";
 }
 
 function renderReportMetrics() {
@@ -2821,4 +2854,14 @@ function formatEngagementCriteria(value) {
     never_accessed_or_incomplete_resources: "Sem acesso nenhum ou com recursos pendentes",
   };
   return map[value] || value || "-";
+}
+
+function alertLabel(value) {
+  const map = {
+    success: "Estavel",
+    info: "Acompanhar",
+    warning: "Atencao",
+    error: "Critico",
+  };
+  return map[value] || "Alerta";
 }
