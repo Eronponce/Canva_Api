@@ -84,7 +84,10 @@ Invoke-Step "Arquivo de notas" {
 
 if (-not $SkipAuth) {
     Invoke-Step "Autenticacao GitHub" {
-        & $ghPath auth status *> $null
+        try {
+            & $ghPath auth status 2>$null | Out-Null
+        } catch {
+        }
         if ($LASTEXITCODE -ne 0) {
             if ($DryRun) {
                 Write-Host "Dry run: autenticacao seria solicitada agora."
@@ -100,7 +103,10 @@ if (-not $SkipAuth) {
 }
 
 Invoke-Step "Release no GitHub" {
-    & $ghPath release view $Tag *> $null
+    try {
+        & $ghPath release view $Tag 2>$null | Out-Null
+    } catch {
+    }
     if ($LASTEXITCODE -eq 0) {
         Write-Host "Ja existe um release para $Tag. Nada a fazer." -ForegroundColor Yellow
         return
