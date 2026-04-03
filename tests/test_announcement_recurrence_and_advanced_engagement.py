@@ -219,6 +219,8 @@ def test_advanced_engagement_filters_use_enrollments(client, app, monkeypatch):
     assert payload["summary"]["total_students_found"] == 3
     assert payload["summary"]["total_inactive_days_matches"] == 2
     assert payload["summary"]["total_low_activity_matches"] == 2
+    assert payload["summary"]["top_priority_course_name"]
+    assert payload["courses"][0]["urgency_score"] >= payload["courses"][-1]["urgency_score"]
     matched_names = {item["student_name"] for item in payload["items"]}
     assert "Aluno 1" in matched_names
     assert "Aluno 3" in matched_names

@@ -1795,6 +1795,7 @@ function renderEngagementPreview(data) {
       <div class="summary-card"><span>Recursos pendentes</span><strong>${escapeHtml(String(summary.total_incomplete_resources_matches || 0))}</strong></div>
       <div class="summary-card"><span>Sem atividade</span><strong>${escapeHtml(String(summary.total_inactive_days_matches || 0))}</strong></div>
       <div class="summary-card"><span>Baixa atividade</span><strong>${escapeHtml(String(summary.total_low_activity_matches || 0))}</strong></div>
+      <div class="summary-card"><span>Turma foco</span><strong>${escapeHtml(summary.top_priority_course_name || summary.top_priority_course_ref || "-")}</strong></div>
       <div class="summary-card"><span>Criterio</span><strong>${escapeHtml(formatEngagementCriteria(summary.criteria_mode || $("#engagementCriteriaMode").value))}</strong></div>
     </div>
     ${notices.length ? `<div class="chips">${notices.map((item) => `<span class="chip dim">${escapeHtml(item)}</span>`).join("")}</div>` : ""}
@@ -1806,8 +1807,10 @@ function renderEngagementPreview(data) {
 function engagementCourseColumns() {
   return [
     { label: "Turma", format: (row) => `${escapeHtml(row.course_name || "-")}<div class="subtle mono">${escapeHtml(String(row.course_id || row.course_ref || "-"))}</div>` },
+    { label: "Prioridade", format: (row) => priorityPill(row.priority_level, row.urgency_score) },
     { label: "Alunos", format: (row) => escapeHtml(String(row.students_found || 0)) },
     { label: "Alvo", format: (row) => escapeHtml(String(row.matched_students || 0)) },
+    { label: "Cobertura", format: (row) => `${escapeHtml(formatSummaryValue(row.matched_ratio || 0))}%` },
     { label: "Sem acesso", format: (row) => escapeHtml(String(row.never_accessed_matches || 0)) },
     { label: "Pendentes", format: (row) => escapeHtml(String(row.incomplete_resources_matches || 0)) },
     { label: "Sem atividade", format: (row) => escapeHtml(String(row.inactive_days_matches || 0)) },
@@ -1821,6 +1824,7 @@ function engagementPreviewColumns() {
   return [
     { label: "Turma", format: (row) => `${escapeHtml(row.course_name || "-")}<div class="subtle mono">${escapeHtml(String(row.course_ref || row.course_id || "-"))}</div>` },
     { label: "Aluno", format: (row) => `${escapeHtml(row.student_name || "-")}<div class="subtle mono">${escapeHtml(String(row.user_id || "-"))}</div>` },
+    { label: "Prioridade", format: (row) => priorityPill(row.priority_level, row.urgency_score) },
     { label: "Acessos", format: (row) => `${escapeHtml(String(row.page_views || 0))} visualizacoes<div class="subtle">${escapeHtml(String(row.participations || 0))} participacoes</div>` },
     { label: "Atividade", format: (row) => `${escapeHtml(formatDateTime(row.last_activity_at))}<div class="subtle">${escapeHtml(String(Math.round((row.total_activity_time_seconds || 0) / 60)))} min</div>` },
     { label: "Recursos", format: (row) => `${escapeHtml(String(row.requirement_completed_count || 0))}/${escapeHtml(String(row.requirement_count || 0))}` },
@@ -2586,6 +2590,18 @@ function deltaPill(delta, deltaPercent = null) {
   const sign = numericDelta > 0 ? "+" : "";
   const percentPart = deltaPercent === null || deltaPercent === undefined ? "" : ` <span>${sign}${formatSummaryValue(deltaPercent)}%</span>`;
   return `<span class="delta-pill ${escapeHtml(direction)}">${escapeHtml(`${sign}${formatSummaryValue(numericDelta)}`)}${percentPart}</span>`;
+}
+
+function priorityPill(level, score = null) {
+  const normalized = String(level || "baixa").toLowerCase();
+  const labelMap = {
+    critica: "Critica",
+    alta: "Alta",
+    media: "Media",
+    baixa: "Baixa",
+  };
+  const scorePart = score === null || score === undefined ? "" : ` <span>${escapeHtml(String(score))}</span>`;
+  return `<span class="priority-pill ${escapeHtml(normalized)}">${escapeHtml(labelMap[normalized] || normalized)}${scorePart}</span>`;
 }
 
 function renderMetricTrend(comparison) {

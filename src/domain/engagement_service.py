@@ -288,6 +288,9 @@ class EngagementService:
         courses_without_module_requirements = 0
         analytics_unavailable_courses = 0
         progress_unavailable_courses = 0
+        top_priority_course_name = ""
+        top_priority_course_ref = ""
+        top_priority_score = 0
 
         for course_ref in course_refs:
             course = client.get_course(course_ref)
@@ -407,6 +410,12 @@ class EngagementService:
                 total_incomplete_matches += 1 if has_incomplete_resources else 0
                 total_inactive_days_matches += 1 if has_inactive_days else 0
                 total_low_activity_matches += 1 if has_low_total_activity else 0
+                urgency_score = self._urgency_score(
+                    has_never_accessed=has_never_accessed,
+                    has_incomplete_resources=has_incomplete_resources,
+                    has_inactive_days=has_inactive_days,
+                    has_low_total_activity=has_low_total_activity,
+                )
 
                 items.append(
                     {
@@ -424,11 +433,26 @@ class EngagementService:
                         "completed_at": completed_at,
                         "reasons": reasons,
                         "reasons_label": self._reasons_label(reasons, criteria_config),
+                        "urgency_score": urgency_score,
+                        "priority_level": self._priority_level(urgency_score),
                     }
                 )
 
             if not course_has_module_requirements:
                 courses_without_module_requirements += 1
+
+            course_urgency_score = self._course_urgency_score(
+                students_found=len(students),
+                matched_students=matched_students,
+                never_accessed_matches=never_accessed_matches,
+                incomplete_matches=incomplete_matches,
+                inactive_days_matches=inactive_days_matches,
+                low_activity_matches=low_activity_matches,
+            )
+            if course_urgency_score > top_priority_score:
+                top_priority_score = course_urgency_score
+                top_priority_course_name = course.get("name") or ""
+                top_priority_course_ref = course_ref
 
             courses.append(
                 {
@@ -448,6 +472,9 @@ class EngagementService:
                     "enrollment_activity_available": enrollment_activity_available,
                     "enrollment_error": enrollment_error,
                     "has_module_requirements": course_has_module_requirements,
+                    "urgency_score": course_urgency_score,
+                    "priority_level": self._priority_level(course_urgency_score),
+                    "matched_ratio": round((matched_students / len(students)) * 100, 2) if students else 0,
                 }
             )
 
@@ -464,12 +491,23 @@ class EngagementService:
                 "courses_without_module_requirements": courses_without_module_requirements,
                 "analytics_unavailable_courses": analytics_unavailable_courses,
                 "progress_unavailable_courses": progress_unavailable_courses,
+                "top_priority_course_name": top_priority_course_name,
+                "top_priority_course_ref": top_priority_course_ref,
+                "top_priority_score": top_priority_score,
                 "criteria_config": criteria_config,
             },
-            "courses": courses,
+            "courses": sorted(
+                courses,
+                key=lambda item: (
+                    -(item.get("urgency_score") or 0),
+                    -(item.get("matched_students") or 0),
+                    (item.get("course_name") or "").lower(),
+                ),
+            ),
             "items": sorted(
                 items,
                 key=lambda item: (
+                    -(item.get("urgency_score") or 0),
                     (item.get("course_name") or "").lower(),
                     (item.get("student_name") or "").lower(),
                     item.get("user_id") or 0,
@@ -565,6 +603,61 @@ class EngagementService:
         if max_total_activity_minutes is None:
             return False
         return total_activity_time <= max(0, int(max_total_activity_minutes)) * 60
+
+    @staticmethod
+    def _urgency_score(
+        *,
+        has_never_accessed: bool,
+        has_incomplete_resources: bool,
+        has_inactive_days: bool,
+        has_low_total_activity: bool,
+    ) -> int:
+        score = 0
+        if has_never_accessed:
+            score += 5
+        if has_incomplete_resources:
+            score += 3
+        if has_inactive_days:
+            score += 2
+        if has_low_total_activity:
+            score += 1
+        return score
+
+    @staticmethod
+    def _priority_level(score: int) -> str:
+        if score >= 8:
+            return "critica"
+        if score >= 5:
+            return "alta"
+        if score >= 3:
+            return "media"
+        return "baixa"
+
+    @staticmethod
+    def _course_urgency_score(
+        *,
+        students_found: int,
+        matched_students: int,
+        never_accessed_matches: int,
+        incomplete_matches: int,
+        inactive_days_matches: int,
+        low_activity_matches: int,
+    ) -> int:
+        ratio_bonus = 0
+        if students_found:
+            ratio = matched_students / students_found
+            if ratio >= 0.7:
+                ratio_bonus = 4
+            elif ratio >= 0.4:
+                ratio_bonus = 2
+        return (
+            (matched_students * 2)
+            + (never_accessed_matches * 3)
+            + (incomplete_matches * 2)
+            + inactive_days_matches
+            + low_activity_matches
+            + ratio_bonus
+        )
 
     @staticmethod
     def _render_template(template: str, **context: str) -> str:

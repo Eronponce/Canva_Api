@@ -119,11 +119,15 @@ def test_engagement_preview_returns_inactive_and_incomplete_students(app, monkey
     assert payload["summary"]["total_matched_students"] == 2
     assert payload["summary"]["total_never_accessed_matches"] == 1
     assert payload["summary"]["total_incomplete_resources_matches"] == 2
+    assert payload["summary"]["top_priority_course_name"] == "Curso 101"
     assert payload["courses"][0]["matched_students"] == 2
+    assert payload["courses"][0]["priority_level"] in {"alta", "critica"}
 
     items_by_user = {item["user_id"]: item for item in payload["items"]}
     assert items_by_user[11]["reasons"] == ["never_accessed", "incomplete_resources"]
     assert items_by_user[22]["reasons"] == ["incomplete_resources"]
+    assert items_by_user[11]["urgency_score"] > items_by_user[22]["urgency_score"]
+    assert items_by_user[11]["priority_level"] in {"alta", "critica"}
     assert 33 not in items_by_user
 
 

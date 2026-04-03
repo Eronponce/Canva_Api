@@ -793,6 +793,47 @@ textarea {
   color: inherit;
 }
 
+.priority-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: rgba(13, 19, 31, 0.9);
+  font-size: 0.76rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.priority-pill.critica {
+  color: #ffd2d2;
+  border-color: rgba(225, 90, 90, 0.35);
+  background: rgba(225, 90, 90, 0.1);
+}
+
+.priority-pill.alta {
+  color: #f2d69c;
+  border-color: rgba(213, 164, 71, 0.35);
+  background: rgba(213, 164, 71, 0.1);
+}
+
+.priority-pill.media {
+  color: #bddcff;
+  border-color: rgba(88, 168, 255, 0.32);
+  background: rgba(88, 168, 255, 0.08);
+}
+
+.priority-pill.baixa {
+  color: #b5e8ca;
+  border-color: rgba(56, 187, 130, 0.32);
+  background: rgba(56, 187, 130, 0.08);
+}
+
+.priority-pill span {
+  color: inherit;
+}
+
 .dashboard-list,
 .compact-list,
 .history-detail,
