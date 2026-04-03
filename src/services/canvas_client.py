@@ -180,6 +180,18 @@ class CanvasClient:
         ]
         return self._iter_paginated(f"/api/v1/courses/{safe_ref}/users", params=params)
 
+    def list_course_student_summaries(self, course_ref: str, *, student_id: int | None = None) -> list[dict]:
+        safe_ref = quote(str(course_ref), safe=":")
+        params: list[tuple[str, str]] = [("per_page", "100"), ("sort_column", "name")]
+        if student_id is not None:
+            params.append(("student_id", str(student_id)))
+        return self._iter_paginated(f"/api/v1/courses/{safe_ref}/analytics/student_summaries", params=params)
+
+    def get_bulk_user_progress(self, course_ref: str) -> list[dict]:
+        safe_ref = quote(str(course_ref), safe=":")
+        params = [("per_page", "100")]
+        return self._iter_paginated(f"/api/v1/courses/{safe_ref}/bulk_user_progress", params=params)
+
     def create_announcement(
         self,
         *,

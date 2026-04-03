@@ -8,6 +8,7 @@ from src.database.legacy_import import LegacyJsonImportService
 from src.domain.announcement_service import AnnouncementService
 from src.domain.connection_service import ConnectionService
 from src.domain.course_service import CourseService
+from src.domain.engagement_service import EngagementService
 from src.domain.env_service import EnvService
 from src.domain.message_service import MessageService
 from src.jobs.job_manager import JobManager
@@ -51,6 +52,7 @@ def create_app() -> Flask:
     env_service = EnvService(app_config)
     announcement_service = AnnouncementService(app_config, connection_service, job_manager)
     message_service = MessageService(app_config, connection_service, job_manager)
+    engagement_service = EngagementService(app_config, connection_service, job_manager)
 
     app.extensions["services"] = {
         "database": database,
@@ -63,6 +65,7 @@ def create_app() -> Flask:
         "env_service": env_service,
         "announcement_service": announcement_service,
         "message_service": message_service,
+        "engagement_service": engagement_service,
     }
 
     app.register_blueprint(web)

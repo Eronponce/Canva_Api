@@ -252,6 +252,51 @@ def preview_message_recipients():
     return jsonify(result)
 
 
+@web.post("/api/engagement/inactive-targets")
+def preview_engagement_targets():
+    raw_payload = request.get_json(silent=True) or {}
+    payload, _course_refs = _with_resolved_courses(
+        raw_payload,
+        "Selecione ao menos um grupo ou curso para a busca ativa.",
+    )
+    result = services()["engagement_service"].preview_targets(payload)
+    return jsonify(result)
+
+
+@web.post("/api/engagement/jobs")
+def create_engagement_job():
+    raw_payload = request.get_json(silent=True) or {}
+    payload, course_refs = _with_resolved_courses(
+        raw_payload,
+        "Selecione ao menos um grupo ou curso para a busca ativa.",
+    )
+    credentials = services()["connection_service"].resolve_credentials(raw_payload)
+    title = (payload.get("subject") or "Busca ativa").strip()
+    job_manager = services()["job_manager"]
+    job = job_manager.create_job(
+        kind="engagement",
+        title=title,
+        base_url=credentials["base_url"],
+        request_payload=_safe_request_payload(payload),
+        request_token_source="inline" if (raw_payload.get("access_token") or raw_payload.get("api_token")) else services()["connection_service"].app_config.default_token_source,
+        requested_strategy=(payload.get("criteria_mode") or "never_accessed_or_incomplete_resources"),
+        effective_strategy="individual_users",
+        dry_run=bool(payload.get("dry_run")),
+        dedupe=False,
+        summary={
+            "course_refs": course_refs,
+            "group_ids": _job_group_ids(raw_payload),
+            "select_all_groups": bool(raw_payload.get("select_all_groups")),
+        },
+    )
+    job_manager.start_background(
+        job["id"],
+        services()["engagement_service"].run_job,
+        payload,
+    )
+    return jsonify({"job": job}), 202
+
+
 @web.get("/api/jobs/<job_id>")
 def get_job(job_id: str):
     job = services()["job_manager"].get_job(job_id)
