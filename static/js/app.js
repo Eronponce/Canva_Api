@@ -51,6 +51,8 @@ const state = {
     selectAllGroups: false,
     preview: null,
     editingId: null,
+    agendaSearch: "",
+    agendaWindowDays: 30,
   },
   engagement: {
     mode: "groups",
@@ -256,6 +258,16 @@ function bindEvents() {
   $("#recurrenceFirstPublishAt").addEventListener("input", persistUiState);
   $("#recurrenceOccurrences").addEventListener("input", persistUiState);
   $("#recurrenceLockComment").addEventListener("change", persistUiState);
+  $("#recurrenceAgendaSearch").addEventListener("input", () => {
+    state.recurrence.agendaSearch = $("#recurrenceAgendaSearch").value.trim().toLowerCase();
+    renderRecurrenceAgenda();
+    persistUiState();
+  });
+  $("#recurrenceAgendaWindow").addEventListener("change", () => {
+    state.recurrence.agendaWindowDays = Number($("#recurrenceAgendaWindow").value || 30);
+    renderRecurrenceAgenda();
+    persistUiState();
+  });
   $("#previewRecurrenceBtn").addEventListener("click", previewRecurrence);
   $("#clearRecurrenceEditBtn").addEventListener("click", clearRecurrenceEditMode);
   $("#recurrenceForm").addEventListener("submit", submitRecurrence);
@@ -456,6 +468,8 @@ function restoreUiState() {
     $("#recurrenceFirstPublishAt").value = saved.recurrenceFirstPublishAt || "";
     $("#recurrenceOccurrences").value = saved.recurrenceOccurrences || "8";
     $("#recurrenceLockComment").checked = Boolean(saved.recurrenceLockComment);
+    $("#recurrenceAgendaSearch").value = saved.recurrenceAgendaSearch || "";
+    $("#recurrenceAgendaWindow").value = saved.recurrenceAgendaWindow || "30";
     $("#engagementCriteriaMode").value = saved.engagementCriteriaMode || "never_accessed_or_incomplete_resources";
     $("#engagementMatchMode").value = saved.engagementMatchMode || "or";
     $("#engagementInactiveDays").value = saved.engagementInactiveDays || "";
@@ -473,6 +487,8 @@ function restoreUiState() {
     state.announcement = { ...state.announcement, ...(saved.announcement || {}) };
     state.message = { ...state.message, ...(saved.message || {}) };
     state.recurrence = { ...state.recurrence, ...(saved.recurrence || {}), preview: null, editingId: null };
+    state.recurrence.agendaSearch = saved.recurrenceAgendaSearch || "";
+    state.recurrence.agendaWindowDays = Number(saved.recurrenceAgendaWindow || saved.recurrence?.agendaWindowDays || 30);
     state.engagement = { ...state.engagement, ...(saved.engagement || {}), preview: null };
     if (!["groups", "courses"].includes(state.message.mode)) {
       state.message.mode = "groups";
@@ -517,6 +533,8 @@ function persistUiState() {
       recurrenceFirstPublishAt: $("#recurrenceFirstPublishAt").value,
       recurrenceOccurrences: $("#recurrenceOccurrences").value,
       recurrenceLockComment: $("#recurrenceLockComment").checked,
+      recurrenceAgendaSearch: $("#recurrenceAgendaSearch").value,
+      recurrenceAgendaWindow: $("#recurrenceAgendaWindow").value,
       engagementCriteriaMode: $("#engagementCriteriaMode").value,
       engagementMatchMode: $("#engagementMatchMode").value,
       engagementInactiveDays: $("#engagementInactiveDays").value,
@@ -540,6 +558,8 @@ function persistUiState() {
         groupIds: state.recurrence.groupIds,
         courseRefs: state.recurrence.courseRefs,
         selectAllGroups: state.recurrence.selectAllGroups,
+        agendaSearch: state.recurrence.agendaSearch,
+        agendaWindowDays: state.recurrence.agendaWindowDays,
       },
       engagement: {
         mode: state.engagement.mode,
@@ -807,6 +827,7 @@ function renderAll() {
   renderCatalogCourseSummary();
   renderRecurrencePreview(state.recurrence.preview);
   renderRecurrences();
+  renderRecurrenceAgenda();
   renderRecurrenceEditorState();
   renderEngagementPreview(state.engagement.preview);
   renderReports();
@@ -1176,6 +1197,116 @@ function renderRecurrences() {
       </div>
     </div>
   `).join("");
+}
+
+function renderRecurrenceAgenda() {
+  const summary = $("#recurrenceAgendaSummary");
+  const list = $("#recurrenceAgendaList");
+  if (!summary || !list) return;
+  const items = buildRecurrenceAgendaItems();
+  const uniqueRecurrences = unique(items.map((item) => item.recurrence_id));
+  const uniqueCourses = unique(items.map((item) => item.course_ref));
+  const nextItem = items[0] || null;
+  summary.innerHTML = `
+    <div class="summary-card"><span>Publicacoes</span><strong>${escapeHtml(String(items.length))}</strong></div>
+    <div class="summary-card"><span>Recorrencias</span><strong>${escapeHtml(String(uniqueRecurrences.length))}</strong></div>
+    <div class="summary-card"><span>Turmas</span><strong>${escapeHtml(String(uniqueCourses.length))}</strong></div>
+    <div class="summary-card"><span>Proxima</span><strong>${escapeHtml(nextItem ? formatDate(nextItem.scheduled_for) : "-")}</strong></div>
+  `;
+  if (!items.length) {
+    list.classList.add("empty-state");
+    list.innerHTML = "Nenhuma publicacao futura encontrada com os filtros atuais.";
+    return;
+  }
+  list.classList.remove("empty-state");
+  const groups = groupRecurrenceAgendaByDay(items);
+  list.innerHTML = groups.map((group) => `
+    <div class="history-item">
+      <div class="history-item-header">
+        <div>
+          <strong>${escapeHtml(group.label)}</strong>
+          <div class="compact-meta">${escapeHtml(String(group.items.length))} publicacao(oes)</div>
+        </div>
+      </div>
+      <div class="dashboard-list">
+        ${group.items.map((item) => `
+          <div class="dashboard-item">
+            <div class="compact-header">
+              <div>
+                <strong>${escapeHtml(item.recurrence_name || item.title || "Recorrencia")}</strong>
+                <div class="compact-meta">${escapeHtml(item.title || "-")}</div>
+              </div>
+              <div class="history-actions">
+                <span class="chip">${escapeHtml(item.time_label)}</span>
+                ${statusChip(item.status || "scheduled")}
+              </div>
+            </div>
+            <div class="compact-meta">${escapeHtml(item.course_name || item.course_ref || "-")} | ${escapeHtml(item.course_ref || "-")}</div>
+          </div>
+        `).join("")}
+      </div>
+    </div>
+  `).join("");
+}
+
+function buildRecurrenceAgendaItems() {
+  const search = state.recurrence.agendaSearch || "";
+  const windowDays = Number(state.recurrence.agendaWindowDays || 30);
+  const now = new Date();
+  const limit = new Date(now.getTime() + windowDays * 24 * 60 * 60 * 1000);
+  return state.recurrences.flatMap((recurrence) => {
+    return (recurrence.items || []).map((item) => ({
+      recurrence_id: recurrence.id,
+      recurrence_name: recurrence.name || recurrence.title || "",
+      title: recurrence.title || "",
+      course_name: item.course_name || "",
+      course_ref: item.course_ref || "",
+      scheduled_for: item.scheduled_for,
+      status: item.status || "scheduled",
+      search: `${recurrence.name || ""} ${recurrence.title || ""} ${item.course_name || ""} ${item.course_ref || ""}`.toLowerCase(),
+    }));
+  }).filter((item) => {
+    const scheduled = new Date(item.scheduled_for);
+    if (Number.isNaN(scheduled.getTime())) return false;
+    if (scheduled < now || scheduled > limit) return false;
+    if (!["scheduled", "created"].includes(String(item.status || "").toLowerCase())) return false;
+    if (search && !item.search.includes(search)) return false;
+    return true;
+  }).sort((left, right) => new Date(left.scheduled_for).getTime() - new Date(right.scheduled_for).getTime()).map((item) => ({
+    ...item,
+    time_label: formatAgendaTime(item.scheduled_for),
+  }));
+}
+
+function groupRecurrenceAgendaByDay(items) {
+  const formatter = new Intl.DateTimeFormat("pt-BR", {
+    weekday: "short",
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  });
+  const groups = [];
+  const map = new Map();
+  items.forEach((item) => {
+    const date = new Date(item.scheduled_for);
+    const key = `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
+    if (!map.has(key)) {
+      const entry = { key, label: formatter.format(date), items: [] };
+      map.set(key, entry);
+      groups.push(entry);
+    }
+    map.get(key).items.push(item);
+  });
+  return groups;
+}
+
+function formatAgendaTime(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "--:--";
+  return date.toLocaleTimeString("pt-BR", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 function applyRecurrenceToForm(item, mode = "reuse") {

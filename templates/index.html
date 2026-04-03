@@ -530,6 +530,26 @@
           <article class="card span-two">
             <div class="card-header">
               <div>
+                <h2>Agenda das proximas publicacoes</h2>
+                <p>Veja em ordem cronologica quais avisos recorrentes ainda vao sair no Canvas.</p>
+              </div>
+            </div>
+            <div class="inline-form">
+              <input id="recurrenceAgendaSearch" type="text" placeholder="Buscar por recorrencia, titulo ou turma">
+              <select id="recurrenceAgendaWindow">
+                <option value="7">Proximos 7 dias</option>
+                <option value="30" selected>Proximos 30 dias</option>
+                <option value="60">Proximos 60 dias</option>
+                <option value="180">Proximos 180 dias</option>
+              </select>
+            </div>
+            <div id="recurrenceAgendaSummary" class="summary-grid spaced-top"></div>
+            <div id="recurrenceAgendaList" class="compact-list empty-state">Nenhuma publicacao futura encontrada.</div>
+          </article>
+
+          <article class="card span-two">
+            <div class="card-header">
+              <div>
                 <h2>Recorrencias criadas</h2>
                 <p>Cancelar remove do Canvas apenas os avisos futuros ainda nao publicados. Os ja publicados ficam no historico do curso.</p>
               </div>
