@@ -702,12 +702,15 @@ class ReportRepository:
         self.database = database
 
     def analytics(self, *, days: int = 30) -> dict:
-        cutoff = utc_now() - timedelta(days=max(days - 1, 0))
+        window_days = max(int(days or 30), 1)
+        current_end = utc_now()
+        current_start = current_end - timedelta(days=window_days)
+        previous_start = current_start - timedelta(days=window_days)
         with self.database.session_scope() as session:
             jobs = session.scalars(
                 select(JobRun)
                 .options(selectinload(JobRun.target_groups), selectinload(JobRun.course_results))
-                .where(JobRun.created_at >= cutoff)
+                .where(JobRun.created_at >= previous_start)
                 .order_by(JobRun.created_at.desc())
             ).all()
             recurrences = session.scalars(
@@ -716,68 +719,20 @@ class ReportRepository:
                 .order_by(AnnouncementRecurrence.created_at.desc())
             ).all()
 
-        durations = []
-        daily = defaultdict(lambda: {"announcement": 0, "message": 0, "engagement": 0, "completed": 0, "failed": 0})
-        by_kind = defaultdict(lambda: {"jobs": 0, "completed": 0, "failed": 0, "dry_run": 0})
-        top_courses = defaultdict(lambda: {"course_name": "", "runs": 0, "success": 0, "failure": 0, "recipients_sent": 0, "announcements": 0})
-        top_groups = defaultdict(lambda: {"group_name": "", "jobs": 0})
-        top_recurrences = defaultdict(lambda: {"name": "", "total_items": 0, "future_items": 0, "canceled_items": 0})
-        recent_failures = []
-        total_recipients_sent = 0
-        total_announcements = 0
-
-        for job in jobs:
-            if job.started_at and job.finished_at:
-                durations.append((job.finished_at - job.started_at).total_seconds())
-            day_key = job.created_at.date().isoformat()
-            daily[day_key][job.kind] += 1
-            if job.status == "completed":
-                daily[day_key]["completed"] += 1
-            if job.status == "failed":
-                daily[day_key]["failed"] += 1
-
-            kind_bucket = by_kind[job.kind]
-            kind_bucket["jobs"] += 1
-            if job.status == "completed":
-                kind_bucket["completed"] += 1
-            if job.status == "failed":
-                kind_bucket["failed"] += 1
-            if job.dry_run:
-                kind_bucket["dry_run"] += 1
-
-            for target_group in job.target_groups:
-                group_bucket = top_groups[target_group.group_public_id or target_group.group_name_snapshot]
-                group_bucket["group_name"] = target_group.group_name_snapshot or target_group.group_public_id
-                group_bucket["jobs"] += 1
-
-            for result in job.course_results:
-                course_key = result.course_ref_snapshot or str(result.course_id or "")
-                course_bucket = top_courses[course_key]
-                course_bucket["course_name"] = result.course_name_snapshot or course_key
-                course_bucket["runs"] += 1
-                if result.status == "success":
-                    course_bucket["success"] += 1
-                if result.status == "error":
-                    course_bucket["failure"] += 1
-                course_bucket["recipients_sent"] += result.recipients_sent
-                if result.announcement_id:
-                    course_bucket["announcements"] += 1
-                    total_announcements += 1
-                total_recipients_sent += result.recipients_sent
-                if result.error_message:
-                    recent_failures.append(
-                        {
-                            "job_id": job.public_id,
-                            "kind": job.kind,
-                            "course_ref": result.course_ref_snapshot,
-                            "course_name": result.course_name_snapshot,
-                            "status": result.status,
-                            "error": result.error_message,
-                            "created_at": datetime_to_iso(job.created_at),
-                        }
-                    )
-
         now = utc_now()
+        current_jobs: list[JobRun] = []
+        previous_jobs: list[JobRun] = []
+        for job in jobs:
+            created_at = _as_utc(job.created_at) or current_end
+            if created_at >= current_start:
+                current_jobs.append(job)
+            elif created_at >= previous_start:
+                previous_jobs.append(job)
+
+        current_stats = self._collect_job_stats(current_jobs)
+        previous_stats = self._collect_job_stats(previous_jobs)
+
+        top_recurrences = defaultdict(lambda: {"name": "", "total_items": 0, "future_items": 0, "canceled_items": 0})
         for recurrence in recurrences:
             item_bucket = top_recurrences[recurrence.public_id]
             item_bucket["name"] = recurrence.name
@@ -793,27 +748,46 @@ class ReportRepository:
                 [item for item in recurrence.items if item.status == "canceled"]
             )
 
-        total_jobs = len(jobs)
-        completed_jobs = len([item for item in jobs if item.status == "completed"])
-        failed_jobs = len([item for item in jobs if item.status == "failed"])
         active_recurrences = len([item for item in recurrences if item.is_active and not item.is_deleted])
+        recurrence_creations_current = len(
+            [item for item in recurrences if (_as_utc(item.created_at) or now) >= current_start]
+        )
+        recurrence_creations_previous = len(
+            [
+                item
+                for item in recurrences
+                if previous_start <= (_as_utc(item.created_at) or now) < current_start
+            ]
+        )
         overview = {
-            "days": days,
-            "total_jobs": total_jobs,
-            "completed_jobs": completed_jobs,
-            "failed_jobs": failed_jobs,
-            "success_rate": round((completed_jobs / total_jobs) * 100, 2) if total_jobs else 0,
-            "avg_duration_seconds": round(sum(durations) / len(durations), 2) if durations else 0,
-            "total_recipients_sent": total_recipients_sent,
-            "total_announcements_created": total_announcements,
-            "total_engagement_jobs": by_kind.get("engagement", {}).get("jobs", 0),
+            "days": window_days,
+            "current_start": datetime_to_iso(current_start),
+            "current_end": datetime_to_iso(current_end),
+            "previous_start": datetime_to_iso(previous_start),
+            "previous_end": datetime_to_iso(current_start),
+            "total_jobs": current_stats["total_jobs"],
+            "completed_jobs": current_stats["completed_jobs"],
+            "failed_jobs": current_stats["failed_jobs"],
+            "success_rate": current_stats["success_rate"],
+            "avg_duration_seconds": current_stats["avg_duration_seconds"],
+            "total_recipients_sent": current_stats["total_recipients_sent"],
+            "total_announcements_created": current_stats["total_announcements_created"],
+            "total_engagement_jobs": current_stats["total_engagement_jobs"],
             "active_recurrences": active_recurrences,
+            "new_recurrences_created": recurrence_creations_current,
+            "comparison": {
+                "total_jobs": self._comparison_bucket(current_stats["total_jobs"], previous_stats["total_jobs"]),
+                "completed_jobs": self._comparison_bucket(current_stats["completed_jobs"], previous_stats["completed_jobs"]),
+                "failed_jobs": self._comparison_bucket(current_stats["failed_jobs"], previous_stats["failed_jobs"]),
+                "success_rate": self._comparison_bucket(current_stats["success_rate"], previous_stats["success_rate"]),
+                "avg_duration_seconds": self._comparison_bucket(current_stats["avg_duration_seconds"], previous_stats["avg_duration_seconds"]),
+                "total_recipients_sent": self._comparison_bucket(current_stats["total_recipients_sent"], previous_stats["total_recipients_sent"]),
+                "total_announcements_created": self._comparison_bucket(current_stats["total_announcements_created"], previous_stats["total_announcements_created"]),
+                "total_engagement_jobs": self._comparison_bucket(current_stats["total_engagement_jobs"], previous_stats["total_engagement_jobs"]),
+                "new_recurrences_created": self._comparison_bucket(recurrence_creations_current, recurrence_creations_previous),
+            },
         }
 
-        daily_items = [{"date": key, **value} for key, value in sorted(daily.items(), key=lambda item: item[0], reverse=True)]
-        by_kind_items = [{"kind": key, **value} for key, value in sorted(by_kind.items(), key=lambda item: item[0])]
-        top_course_items = [{"course_ref": key, **value} for key, value in sorted(top_courses.items(), key=lambda item: item[1]["runs"], reverse=True)[:10]]
-        top_group_items = [{"group_id": key, **value} for key, value in sorted(top_groups.items(), key=lambda item: item[1]["jobs"], reverse=True)[:10]]
         recurrence_items = [{"recurrence_id": key, **value} for key, value in sorted(top_recurrences.items(), key=lambda item: item[1]["total_items"], reverse=True)[:10]]
         upcoming_recurrence_items = [
             {
@@ -837,15 +811,213 @@ class ReportRepository:
         return {
             "overview": overview,
             "sections": {
-                "operational": {"title": "Operacional por periodo", "items": by_kind_items},
-                "daily_volume": {"title": "Volume diario", "items": daily_items},
-                "top_courses": {"title": "Cursos mais movimentados", "items": top_course_items},
-                "top_groups": {"title": "Grupos mais usados", "items": top_group_items},
+                "period_comparison": {"title": "Comparativo do periodo", "items": self._period_comparison_items(overview)},
+                "operational": {"title": "Operacional por tipo", "items": self._kind_comparison_items(current_stats["by_kind"], previous_stats["by_kind"])},
+                "daily_volume": {"title": "Volume diario do periodo atual", "items": current_stats["daily_items"]},
+                "top_courses": {"title": "Cursos mais movimentados", "items": self._course_comparison_items(current_stats["top_courses"], previous_stats["top_courses"])},
+                "top_groups": {"title": "Grupos mais usados", "items": self._group_comparison_items(current_stats["top_groups"], previous_stats["top_groups"])},
                 "active_recurrences": {"title": "Recorrencias mais carregadas", "items": recurrence_items},
                 "upcoming_recurrences": {"title": "Recorrencias ativas", "items": upcoming_recurrence_items},
-                "recent_failures": {"title": "Falhas recentes", "items": recent_failures[:15]},
+                "recent_failures": {"title": "Falhas recentes", "items": current_stats["recent_failures"][:15]},
             },
         }
+
+    def _collect_job_stats(self, jobs: list[JobRun]) -> dict:
+        durations = []
+        daily = defaultdict(lambda: {"announcement": 0, "message": 0, "engagement": 0, "completed": 0, "failed": 0})
+        by_kind = defaultdict(lambda: {"jobs": 0, "completed": 0, "failed": 0, "dry_run": 0, "recipients_sent": 0, "announcements": 0})
+        top_courses = defaultdict(lambda: {"course_name": "", "runs": 0, "success": 0, "failure": 0, "recipients_sent": 0, "announcements": 0})
+        top_groups = defaultdict(lambda: {"group_name": "", "jobs": 0})
+        recent_failures = []
+        total_recipients_sent = 0
+        total_announcements = 0
+
+        for job in jobs:
+            if job.started_at and job.finished_at:
+                durations.append((_as_utc(job.finished_at) - _as_utc(job.started_at)).total_seconds())
+
+            created_at = _as_utc(job.created_at) or utc_now()
+            day_key = created_at.date().isoformat()
+            daily[day_key][job.kind] += 1
+            if job.status == "completed":
+                daily[day_key]["completed"] += 1
+            if job.status == "failed":
+                daily[day_key]["failed"] += 1
+
+            kind_bucket = by_kind[job.kind]
+            kind_bucket["jobs"] += 1
+            if job.status == "completed":
+                kind_bucket["completed"] += 1
+            if job.status == "failed":
+                kind_bucket["failed"] += 1
+            if job.dry_run:
+                kind_bucket["dry_run"] += 1
+
+            for target_group in job.target_groups:
+                group_key = target_group.group_public_id or target_group.group_name_snapshot
+                group_bucket = top_groups[group_key]
+                group_bucket["group_name"] = target_group.group_name_snapshot or target_group.group_public_id
+                group_bucket["jobs"] += 1
+
+            for result in job.course_results:
+                course_key = result.course_ref_snapshot or str(result.course_id or "")
+                course_bucket = top_courses[course_key]
+                course_bucket["course_name"] = result.course_name_snapshot or course_key
+                course_bucket["runs"] += 1
+                if result.status == "success":
+                    course_bucket["success"] += 1
+                if result.status == "error":
+                    course_bucket["failure"] += 1
+                course_bucket["recipients_sent"] += result.recipients_sent
+                kind_bucket["recipients_sent"] += result.recipients_sent
+                total_recipients_sent += result.recipients_sent
+                if result.announcement_id:
+                    course_bucket["announcements"] += 1
+                    kind_bucket["announcements"] += 1
+                    total_announcements += 1
+                if result.error_message:
+                    recent_failures.append(
+                        {
+                            "job_id": job.public_id,
+                            "kind": job.kind,
+                            "course_ref": result.course_ref_snapshot,
+                            "course_name": result.course_name_snapshot,
+                            "status": result.status,
+                            "error": result.error_message,
+                            "created_at": datetime_to_iso(created_at),
+                        }
+                    )
+
+        total_jobs = len(jobs)
+        completed_jobs = len([item for item in jobs if item.status == "completed"])
+        failed_jobs = len([item for item in jobs if item.status == "failed"])
+        for item in by_kind.values():
+            item["success_rate"] = round((item["completed"] / item["jobs"]) * 100, 2) if item["jobs"] else 0
+
+        return {
+            "total_jobs": total_jobs,
+            "completed_jobs": completed_jobs,
+            "failed_jobs": failed_jobs,
+            "success_rate": round((completed_jobs / total_jobs) * 100, 2) if total_jobs else 0,
+            "avg_duration_seconds": round(sum(durations) / len(durations), 2) if durations else 0,
+            "total_recipients_sent": total_recipients_sent,
+            "total_announcements_created": total_announcements,
+            "total_engagement_jobs": by_kind.get("engagement", {}).get("jobs", 0),
+            "daily_items": [{"date": key, **value} for key, value in sorted(daily.items(), key=lambda item: item[0], reverse=True)],
+            "by_kind": dict(by_kind),
+            "top_courses": dict(top_courses),
+            "top_groups": dict(top_groups),
+            "recent_failures": recent_failures,
+        }
+
+    @staticmethod
+    def _comparison_bucket(current_value, previous_value) -> dict:
+        current_numeric = round(float(current_value or 0), 2)
+        previous_numeric = round(float(previous_value or 0), 2)
+        delta = round(current_numeric - previous_numeric, 2)
+        if previous_numeric == 0:
+            delta_percent = 0 if current_numeric == 0 else None
+        else:
+            delta_percent = round((delta / previous_numeric) * 100, 2)
+        direction = "up" if delta > 0 else "down" if delta < 0 else "flat"
+        return {
+            "current": current_numeric,
+            "previous": previous_numeric,
+            "delta": delta,
+            "delta_percent": delta_percent,
+            "direction": direction,
+            "baseline_empty": previous_numeric == 0,
+        }
+
+    def _period_comparison_items(self, overview: dict) -> list[dict]:
+        labels = {
+            "total_jobs": "Lotes",
+            "completed_jobs": "Concluidos",
+            "failed_jobs": "Falhas",
+            "success_rate": "Taxa de sucesso",
+            "avg_duration_seconds": "Duracao media (s)",
+            "total_recipients_sent": "Mensagens enviadas",
+            "total_announcements_created": "Comunicados criados",
+            "total_engagement_jobs": "Envios para inativos",
+            "new_recurrences_created": "Novas recorrencias",
+        }
+        return [
+            {"metric": labels[key], **value}
+            for key, value in overview.get("comparison", {}).items()
+            if key in labels
+        ]
+
+    def _kind_comparison_items(self, current_map: dict, previous_map: dict) -> list[dict]:
+        items = []
+        for key in sorted(set(current_map) | set(previous_map)):
+            current_item = current_map.get(key, {})
+            previous_item = previous_map.get(key, {})
+            items.append(
+                {
+                    "kind": key,
+                    "current_jobs": current_item.get("jobs", 0),
+                    "previous_jobs": previous_item.get("jobs", 0),
+                    "delta_jobs": current_item.get("jobs", 0) - previous_item.get("jobs", 0),
+                    "current_completed": current_item.get("completed", 0),
+                    "previous_completed": previous_item.get("completed", 0),
+                    "current_failed": current_item.get("failed", 0),
+                    "previous_failed": previous_item.get("failed", 0),
+                    "current_dry_run": current_item.get("dry_run", 0),
+                    "previous_dry_run": previous_item.get("dry_run", 0),
+                    "current_success_rate": current_item.get("success_rate", 0),
+                    "previous_success_rate": previous_item.get("success_rate", 0),
+                    "current_recipients_sent": current_item.get("recipients_sent", 0),
+                    "previous_recipients_sent": previous_item.get("recipients_sent", 0),
+                    "current_announcements": current_item.get("announcements", 0),
+                    "previous_announcements": previous_item.get("announcements", 0),
+                }
+            )
+        return items
+
+    def _course_comparison_items(self, current_map: dict, previous_map: dict) -> list[dict]:
+        items = []
+        for key in set(current_map) | set(previous_map):
+            current_item = current_map.get(key, {})
+            previous_item = previous_map.get(key, {})
+            items.append(
+                {
+                    "course_ref": key,
+                    "course_name": current_item.get("course_name") or previous_item.get("course_name") or key,
+                    "current_runs": current_item.get("runs", 0),
+                    "previous_runs": previous_item.get("runs", 0),
+                    "delta_runs": current_item.get("runs", 0) - previous_item.get("runs", 0),
+                    "current_success": current_item.get("success", 0),
+                    "previous_success": previous_item.get("success", 0),
+                    "current_failure": current_item.get("failure", 0),
+                    "previous_failure": previous_item.get("failure", 0),
+                    "current_recipients_sent": current_item.get("recipients_sent", 0),
+                    "previous_recipients_sent": previous_item.get("recipients_sent", 0),
+                    "delta_recipients_sent": current_item.get("recipients_sent", 0) - previous_item.get("recipients_sent", 0),
+                    "current_announcements": current_item.get("announcements", 0),
+                    "previous_announcements": previous_item.get("announcements", 0),
+                }
+            )
+        return sorted(
+            items,
+            key=lambda item: (item["current_runs"], item["previous_runs"], item["current_recipients_sent"]),
+            reverse=True,
+        )[:10]
+
+    def _group_comparison_items(self, current_map: dict, previous_map: dict) -> list[dict]:
+        items = []
+        for key in set(current_map) | set(previous_map):
+            current_item = current_map.get(key, {})
+            previous_item = previous_map.get(key, {})
+            items.append(
+                {
+                    "group_id": key,
+                    "group_name": current_item.get("group_name") or previous_item.get("group_name") or key,
+                    "current_jobs": current_item.get("jobs", 0),
+                    "previous_jobs": previous_item.get("jobs", 0),
+                    "delta_jobs": current_item.get("jobs", 0) - previous_item.get("jobs", 0),
+                }
+            )
+        return sorted(items, key=lambda item: (item["current_jobs"], item["previous_jobs"]), reverse=True)[:10]
 
 
 class AnnouncementRecurrenceRepository:

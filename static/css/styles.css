@@ -620,6 +620,69 @@ textarea {
   word-break: break-word;
 }
 
+.overview-card {
+  display: grid;
+  gap: 4px;
+}
+
+.metric-helper,
+.metric-trend {
+  display: block;
+  font-size: 0.76rem;
+  line-height: 1.45;
+}
+
+.metric-helper {
+  color: var(--muted);
+}
+
+.metric-trend {
+  color: #cfd8e3;
+}
+
+.metric-trend.up {
+  color: #9fd0ff;
+}
+
+.metric-trend.down {
+  color: #ffb5b5;
+}
+
+.metric-trend.flat {
+  color: var(--muted);
+}
+
+.delta-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: rgba(13, 19, 31, 0.9);
+  font-size: 0.76rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.delta-pill.up {
+  color: #a6d6ff;
+  border-color: rgba(88, 168, 255, 0.28);
+}
+
+.delta-pill.down {
+  color: #ffb5b5;
+  border-color: rgba(225, 90, 90, 0.28);
+}
+
+.delta-pill.flat {
+  color: var(--muted);
+}
+
+.delta-pill span {
+  color: inherit;
+}
+
 .dashboard-list,
 .compact-list,
 .history-detail,

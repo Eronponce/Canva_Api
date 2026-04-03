@@ -2336,15 +2336,21 @@ function renderReports() {
 
 function renderReportMetrics() {
   const overview = state.reportAnalytics?.overview || {};
+  const comparison = overview.comparison || {};
   $("#reportMetrics").innerHTML = [
-    metricCard("Periodo", `${overview.days || state.reportDays || 30} dias`),
-    metricCard("Lotes", overview.total_jobs || 0),
-    metricCard("Taxa de sucesso", `${formatSummaryValue(overview.success_rate || 0)}%`),
-    metricCard("Duracao media", `${formatSummaryValue(overview.avg_duration_seconds || 0)}s`),
-    metricCard("Mensagens enviadas", overview.total_recipients_sent || 0),
-    metricCard("Comunicados criados", overview.total_announcements_created || 0),
-    metricCard("Inativos", overview.total_engagement_jobs || 0),
-    metricCard("Recorrencias ativas", overview.active_recurrences || 0),
+    metricCard(
+      "Janela atual",
+      formatDateRangeCompact(overview.current_start, overview.current_end) || `${overview.days || state.reportDays || 30} dias`,
+      null,
+      overview.previous_start ? `Anterior: ${formatDateRangeCompact(overview.previous_start, overview.previous_end)}` : "",
+    ),
+    metricCard("Lotes", overview.total_jobs || 0, comparison.total_jobs),
+    metricCard("Taxa de sucesso", `${formatSummaryValue(overview.success_rate || 0)}%`, comparison.success_rate),
+    metricCard("Duracao media", `${formatSummaryValue(overview.avg_duration_seconds || 0)}s`, comparison.avg_duration_seconds),
+    metricCard("Mensagens enviadas", overview.total_recipients_sent || 0, comparison.total_recipients_sent),
+    metricCard("Comunicados criados", overview.total_announcements_created || 0, comparison.total_announcements_created),
+    metricCard("Inativos", overview.total_engagement_jobs || 0, comparison.total_engagement_jobs),
+    metricCard("Recorrencias ativas", overview.active_recurrences || 0, comparison.new_recurrences_created, "Ativas agora"),
   ].join("");
 }
 
@@ -2447,13 +2453,23 @@ function reportColumns(kind) {
 }
 
 function reportAnalyticsColumns(sectionKey) {
+  if (sectionKey === "period_comparison") {
+    return [
+      { label: "Indicador", format: (row) => escapeHtml(row.metric || "-") },
+      { label: "Atual", format: (row) => escapeHtml(formatSummaryValue(row.current)) },
+      { label: "Anterior", format: (row) => escapeHtml(formatSummaryValue(row.previous)) },
+      { label: "Delta", format: (row) => deltaPill(row.delta, row.delta_percent) },
+    ];
+  }
   if (sectionKey === "operational") {
     return [
       { label: "Tipo", format: (row) => escapeHtml(row.kind || "-") },
-      { label: "Lotes", format: (row) => escapeHtml(String(row.jobs || 0)) },
-      { label: "Concluidos", format: (row) => escapeHtml(String(row.completed || 0)) },
-      { label: "Falhas", format: (row) => escapeHtml(String(row.failed || 0)) },
-      { label: "Dry run", format: (row) => escapeHtml(String(row.dry_run || 0)) },
+      { label: "Lotes atuais", format: (row) => escapeHtml(String(row.current_jobs || 0)) },
+      { label: "Lotes anteriores", format: (row) => escapeHtml(String(row.previous_jobs || 0)) },
+      { label: "Delta", format: (row) => deltaPill(row.delta_jobs) },
+      { label: "Taxa atual", format: (row) => escapeHtml(`${formatSummaryValue(row.current_success_rate || 0)}%`) },
+      { label: "Taxa anterior", format: (row) => escapeHtml(`${formatSummaryValue(row.previous_success_rate || 0)}%`) },
+      { label: "Dry run", format: (row) => `${escapeHtml(String(row.current_dry_run || 0))}<div class="subtle">ant.: ${escapeHtml(String(row.previous_dry_run || 0))}</div>` },
     ];
   }
   if (sectionKey === "daily_volume") {
@@ -2469,17 +2485,19 @@ function reportAnalyticsColumns(sectionKey) {
   if (sectionKey === "top_courses") {
     return [
       { label: "Curso", format: (row) => `${escapeHtml(row.course_name || "-")}<div class="subtle mono">${escapeHtml(String(row.course_ref || "-"))}</div>` },
-      { label: "Execucoes", format: (row) => escapeHtml(String(row.runs || 0)) },
-      { label: "Sucesso", format: (row) => escapeHtml(String(row.success || 0)) },
-      { label: "Falha", format: (row) => escapeHtml(String(row.failure || 0)) },
-      { label: "Mensagens", format: (row) => escapeHtml(String(row.recipients_sent || 0)) },
-      { label: "Comunicados", format: (row) => escapeHtml(String(row.announcements || 0)) },
+      { label: "Execucoes", format: (row) => `${escapeHtml(String(row.current_runs || 0))}<div class="subtle">ant.: ${escapeHtml(String(row.previous_runs || 0))}</div>` },
+      { label: "Delta exec.", format: (row) => deltaPill(row.delta_runs) },
+      { label: "Sucesso", format: (row) => `${escapeHtml(String(row.current_success || 0))}<div class="subtle">ant.: ${escapeHtml(String(row.previous_success || 0))}</div>` },
+      { label: "Falha", format: (row) => `${escapeHtml(String(row.current_failure || 0))}<div class="subtle">ant.: ${escapeHtml(String(row.previous_failure || 0))}</div>` },
+      { label: "Mensagens", format: (row) => `${escapeHtml(String(row.current_recipients_sent || 0))}<div class="subtle">ant.: ${escapeHtml(String(row.previous_recipients_sent || 0))}</div>` },
+      { label: "Delta msg.", format: (row) => deltaPill(row.delta_recipients_sent) },
     ];
   }
   if (sectionKey === "top_groups") {
     return [
       { label: "Grupo", format: (row) => `${escapeHtml(row.group_name || "-")}<div class="subtle mono">${escapeHtml(String(row.group_id || "-"))}</div>` },
-      { label: "Execucoes", format: (row) => escapeHtml(String(row.jobs || 0)) },
+      { label: "Execucoes", format: (row) => `${escapeHtml(String(row.current_jobs || 0))}<div class="subtle">ant.: ${escapeHtml(String(row.previous_jobs || 0))}</div>` },
+      { label: "Delta", format: (row) => deltaPill(row.delta_jobs) },
     ];
   }
   if (sectionKey === "active_recurrences") {
@@ -2523,8 +2541,34 @@ function renderTable(columns, rows) {
   `;
 }
 
-function metricCard(label, value) {
-  return `<div class="overview-card"><span>${escapeHtml(label)}</span><strong>${escapeHtml(String(value))}</strong></div>`;
+function metricCard(label, value, comparison = null, helper = "") {
+  const comparisonHtml = comparison ? `<small class="metric-trend ${escapeHtml(comparison.direction || "flat")}">${escapeHtml(renderMetricTrend(comparison))}</small>` : "";
+  const helperHtml = helper ? `<small class="metric-helper">${escapeHtml(helper)}</small>` : "";
+  return `<div class="overview-card"><span>${escapeHtml(label)}</span><strong>${escapeHtml(String(value))}</strong>${helperHtml}${comparisonHtml}</div>`;
+}
+
+function deltaPill(delta, deltaPercent = null) {
+  const numericDelta = Number(delta || 0);
+  const direction = numericDelta > 0 ? "up" : numericDelta < 0 ? "down" : "flat";
+  const sign = numericDelta > 0 ? "+" : "";
+  const percentPart = deltaPercent === null || deltaPercent === undefined ? "" : ` <span>${sign}${formatSummaryValue(deltaPercent)}%</span>`;
+  return `<span class="delta-pill ${escapeHtml(direction)}">${escapeHtml(`${sign}${formatSummaryValue(numericDelta)}`)}${percentPart}</span>`;
+}
+
+function renderMetricTrend(comparison) {
+  if (!comparison) return "";
+  const current = Number(comparison.current || 0);
+  const previous = Number(comparison.previous || 0);
+  const delta = Number(comparison.delta || 0);
+  const sign = delta > 0 ? "+" : "";
+  if (comparison.baseline_empty && previous === 0 && current > 0) {
+    return `${sign}${formatSummaryValue(delta)} sobre base zero`;
+  }
+  const deltaText = `${sign}${formatSummaryValue(delta)}`;
+  const percentText = comparison.delta_percent === null || comparison.delta_percent === undefined
+    ? ""
+    : ` (${sign}${formatSummaryValue(comparison.delta_percent)}%)`;
+  return `${deltaText} vs ${formatSummaryValue(previous)} anterior${percentText}`;
 }
 
 function summaryChips(summary) {
@@ -2734,6 +2778,18 @@ function formatDate(value) {
 
 function formatDateTime(value) {
   return formatDate(value);
+}
+
+function formatDateRangeCompact(startValue, endValue) {
+  if (!startValue || !endValue) return "";
+  const start = new Date(startValue);
+  const end = new Date(endValue);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return "";
+  const formatter = new Intl.DateTimeFormat("pt-BR", {
+    day: "2-digit",
+    month: "short",
+  });
+  return `${formatter.format(start)} - ${formatter.format(end)}`;
 }
 
 function formatLocalDateTimeInput(value) {

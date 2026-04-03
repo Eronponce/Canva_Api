@@ -13,6 +13,7 @@ Painel web local para operar em lote no Canvas LMS usando apenas endpoints ofici
 - envia mensagens pela caixa de entrada do Canvas em lote com anexo opcional
 - envia mensagens para alunos inativos com base em analytics e progresso de modulos
 - revisa o alvo antes do envio em comunicados, caixa de entrada e inativos
+- compara periodo atual vs periodo anterior equivalente nos relatorios
 - registra historico, resultados por turma e exportacao em CSV
 - permite limpar todo o banco local com confirmacao digitada
 
@@ -33,7 +34,7 @@ Painel web local para operar em lote no Canvas LMS usando apenas endpoints ofici
 7. `Configuracoes`
    resumo operacional, editor do `.env` e zona de perigo
 8. `Relatorios`
-   historico, analitico e download de CSV
+   historico, analitico comparativo e download de CSV
 
 ## Revisao antes do envio
 

@@ -2,6 +2,11 @@ from __future__ import annotations
 
 import io
 import json
+from datetime import UTC, datetime, timedelta
+
+from sqlalchemy import select
+
+from src.database.models import JobRun
 
 
 class FakeCourseLookupClient:
@@ -488,14 +493,52 @@ def test_reports_analytics_endpoint_returns_collapsible_sections_shape(app):
         },
     )
 
+    engagement_job = services["job_manager"].create_job(
+        kind="engagement",
+        title="Inativos Analitico",
+        summary={"course_refs": ["202"], "group_ids": [group["id"]]},
+    )
+    services["job_manager"].complete(
+        engagement_job["id"],
+        result={
+            "summary": {"success_count": 1, "failure_count": 0},
+            "course_results": [
+                {
+                    "course_ref": "202",
+                    "course_id": 202,
+                    "course_name": "Curso 202",
+                    "status": "success",
+                    "students_found": 6,
+                    "recipients_targeted": 3,
+                    "recipients_sent": 3,
+                }
+            ],
+        },
+    )
+
+    with services["database"].session_scope() as session:
+        row = session.scalar(select(JobRun).where(JobRun.public_id == announcement_job["id"]))
+        shifted = datetime.now(UTC) - timedelta(days=40)
+        row.created_at = shifted
+        row.started_at = shifted
+        row.finished_at = shifted + timedelta(minutes=2)
+
     response = client.get("/api/reports/analytics?days=30")
     assert response.status_code == 200
     payload = response.get_json()
     assert payload["overview"]["total_jobs"] == 2
+    assert payload["overview"]["comparison"]["total_jobs"]["previous"] == 1
+    assert payload["overview"]["comparison"]["total_jobs"]["delta"] == 1
+    assert payload["overview"]["comparison"]["total_recipients_sent"]["current"] == 11
+    assert payload["overview"]["comparison"]["total_announcements_created"]["previous"] == 1
+    assert "period_comparison" in payload["sections"]
     assert "operational" in payload["sections"]
     assert "top_courses" in payload["sections"]
     assert "recent_failures" in payload["sections"]
     assert payload["sections"]["top_groups"]["items"][0]["group_name"] == "Grupo Analitico"
+    announcement_row = next(item for item in payload["sections"]["operational"]["items"] if item["kind"] == "announcement")
+    assert announcement_row["current_jobs"] == 0
+    assert announcement_row["previous_jobs"] == 1
 
 
 def test_database_wipe_endpoint_hard_deletes_everything(app, monkeypatch):
