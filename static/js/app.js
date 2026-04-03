@@ -1105,8 +1105,32 @@ function renderRecurrencePreview(preview) {
     <div class="summary-card"><span>Ocorrencias por turma</span><strong>${escapeHtml(String(preview.summary?.occurrences_per_course || 0))}</strong></div>
     <div class="summary-card"><span>Total de avisos</span><strong>${escapeHtml(String(preview.summary?.total_announcements || 0))}</strong></div>
     <div class="summary-card"><span>Ultima publicacao</span><strong>${escapeHtml(formatDate(preview.summary?.last_publish_at || ""))}</strong></div>
+    ${preview.edit_diff ? `
+      <div class="summary-card"><span>Turmas novas</span><strong>${escapeHtml(String(preview.edit_diff.added_courses || 0))}</strong></div>
+      <div class="summary-card"><span>Turmas removidas</span><strong>${escapeHtml(String(preview.edit_diff.removed_courses || 0))}</strong></div>
+      <div class="summary-card"><span>Turmas atualizadas</span><strong>${escapeHtml(String(preview.edit_diff.updated_courses || 0))}</strong></div>
+      <div class="summary-card"><span>Sem mudanca</span><strong>${escapeHtml(String(preview.edit_diff.unchanged_courses || 0))}</strong></div>
+      <div class="summary-card"><span>Avisos que saem</span><strong>${escapeHtml(String(preview.edit_diff.delete_items_expected || 0))}</strong></div>
+      <div class="summary-card"><span>Avisos que entram</span><strong>${escapeHtml(String(preview.edit_diff.create_items_expected || 0))}</strong></div>
+    ` : ""}
   `;
-  schedule.innerHTML = (preview.schedule || []).map((item) => `
+  const editDiffBlock = preview.edit_diff ? `
+    <div class="history-item">
+      <div class="history-item-header">
+        <div>
+          <strong>Impacto por turma</strong>
+          <div class="compact-meta">Confira o que sera mantido, removido ou recriado ao salvar.</div>
+        </div>
+      </div>
+      <div class="chips">
+        ${(preview.edit_diff.course_changes || []).map((item) => {
+          const labelMap = { add: "entra", remove: "sai", update: "atualiza", keep: "mantem" };
+          return `<span class="chip">${escapeHtml(item.course_name || item.course_ref)} | ${escapeHtml(labelMap[item.action] || item.action)}${item.future_items ? ` | ${escapeHtml(String(item.future_items))} futuro(s)` : ""}${item.new_occurrences ? ` | +${escapeHtml(String(item.new_occurrences))}` : ""}</span>`;
+        }).join("")}
+      </div>
+    </div>
+  ` : "";
+  schedule.innerHTML = editDiffBlock + (preview.schedule || []).map((item) => `
     <div class="history-item">
       <div class="history-item-header">
         <div>
@@ -1184,7 +1208,9 @@ function applyRecurrenceToForm(item, mode = "reuse") {
 
 function clearRecurrenceEditMode(showFeedback = true) {
   state.recurrence.editingId = null;
+  state.recurrence.preview = null;
   renderRecurrenceEditorState();
+  renderRecurrencePreview(null);
   if (showFeedback) {
     showNotice("Formulario de recorrencia voltou ao modo de criacao.", "info");
   }
@@ -1207,7 +1233,7 @@ function renderRecurrenceEditorState() {
     return;
   }
   notice.classList.remove("hidden");
-  notice.textContent = `Editando ${current.name || current.title || "recorrencia"}: os avisos futuros serao substituidos no Canvas.`;
+  notice.textContent = `Editando ${current.name || current.title || "recorrencia"}: use "Prever datas" para ver quais turmas vao manter, sair ou recriar avisos futuros.`;
   clearButton.classList.remove("hidden");
   submitButton.textContent = "Salvar ajustes";
 }
@@ -2383,6 +2409,7 @@ function buildRecurrenceRequestBody() {
   return {
     ...getConnectionPayload(),
     ...getTargetPayload("recurrence"),
+    recurrence_id: state.recurrence.editingId || "",
     target_mode: state.recurrence.mode,
     name: $("#recurrenceName").value.trim(),
     title: $("#recurrenceTitle").value.trim(),

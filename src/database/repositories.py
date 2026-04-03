@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import delete, inspect, select, text, update
 from sqlalchemy.orm import selectinload
@@ -48,6 +49,22 @@ def _as_utc(value: datetime | None) -> datetime | None:
     if value.tzinfo is None:
         return value.replace(tzinfo=UTC)
     return value.astimezone(UTC)
+
+
+def _with_timezone(value: datetime | None, timezone_name: str | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        try:
+            return value.replace(tzinfo=ZoneInfo(timezone_name or "UTC"))
+        except Exception:  # noqa: BLE001
+            return value.replace(tzinfo=UTC)
+    if timezone_name:
+        try:
+            return value.astimezone(ZoneInfo(timezone_name))
+        except Exception:  # noqa: BLE001
+            return value
+    return value
 
 
 class CourseRepository:
@@ -1412,14 +1429,14 @@ class AnnouncementRecurrenceRepository:
             return self._serialize_recurrence(row)
 
     @staticmethod
-    def _serialize_item(row: AnnouncementRecurrenceItem) -> dict:
+    def _serialize_item(row: AnnouncementRecurrenceItem, timezone_name: str | None = None) -> dict:
         return {
             "item_id": row.id,
             "occurrence_index": row.occurrence_index,
             "course_ref": row.course_ref_snapshot,
             "course_id": row.course_id_snapshot,
             "course_name": row.course_name_snapshot,
-            "scheduled_for": datetime_to_iso(row.scheduled_for),
+            "scheduled_for": datetime_to_iso(_with_timezone(row.scheduled_for, timezone_name)),
             "canvas_topic_id": row.canvas_topic_id,
             "canvas_topic_url": row.canvas_topic_url,
             "status": row.status,
@@ -1435,7 +1452,8 @@ class AnnouncementRecurrenceRepository:
         if row is None:
             return None
         now = utc_now()
-        items = [cls._serialize_item(item) for item in sorted(row.items, key=lambda entry: (entry.scheduled_for, entry.course_ref_snapshot, entry.occurrence_index))]
+        timezone_name = row.client_timezone or "UTC"
+        items = [cls._serialize_item(item, timezone_name) for item in sorted(row.items, key=lambda entry: (entry.scheduled_for, entry.course_ref_snapshot, entry.occurrence_index))]
         future_items = [
             item
             for item in row.items
@@ -1452,7 +1470,7 @@ class AnnouncementRecurrenceRepository:
             "recurrence_type": row.recurrence_type,
             "interval_value": row.interval_value,
             "occurrence_count": row.occurrence_count,
-            "first_publish_at": datetime_to_iso(row.first_publish_at),
+            "first_publish_at": datetime_to_iso(_with_timezone(row.first_publish_at, timezone_name)),
             "client_timezone": row.client_timezone,
             "base_url_snapshot": row.base_url_snapshot,
             "canvas_user_id": row.canvas_user_id,
@@ -1471,7 +1489,7 @@ class AnnouncementRecurrenceRepository:
             "future_items": len(future_items),
             "canceled_items": len([item for item in row.items if item.status == "canceled"]),
             "error_items": len([item for item in row.items if item.status == "error"]),
-            "next_publish_at": datetime_to_iso(min((item.scheduled_for for item in future_items), default=None)),
+            "next_publish_at": datetime_to_iso(_with_timezone(min((item.scheduled_for for item in future_items), default=None), timezone_name)),
             "items": items,
         }
 

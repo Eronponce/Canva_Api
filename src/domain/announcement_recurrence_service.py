@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 from src.services.canvas_client import CanvasApiError
 from src.utils.time_utils import datetime_to_iso, parse_schedule_datetime, utc_now
@@ -25,7 +25,7 @@ class AnnouncementRecurrenceService:
 
     def preview(self, payload: dict) -> dict:
         prepared = self._prepare(payload)
-        return {
+        response = {
             "summary": {
                 "courses": len(prepared["courses"]),
                 "occurrences_per_course": len(prepared["schedule"]),
@@ -44,6 +44,25 @@ class AnnouncementRecurrenceService:
                 for index, when in enumerate(prepared["schedule"], start=1)
             ],
         }
+        recurrence_id = str(payload.get("recurrence_id") or "").strip()
+        if recurrence_id:
+            recurrence = self.recurrence_repository.get_recurrence(recurrence_id, active_only=None)
+            if not recurrence:
+                raise ValueError("Recorrencia de avisos nao encontrada.")
+            diff = self._build_update_diff(recurrence, prepared)
+            response["edit_diff"] = self._serialize_edit_diff(diff)
+            response["summary"].update(
+                {
+                    "editing": True,
+                    "added_courses": diff["added_courses"],
+                    "removed_courses": diff["removed_courses"],
+                    "updated_courses": diff["updated_courses"],
+                    "unchanged_courses": diff["unchanged_courses"],
+                    "delete_items_expected": diff["delete_items_expected"],
+                    "create_items_expected": diff["create_items_expected"],
+                }
+            )
+        return response
 
     def create_recurrence(self, payload: dict) -> dict:
         prepared = self._prepare(payload)
@@ -83,41 +102,44 @@ class AnnouncementRecurrenceService:
 
         prepared = self._prepare(payload)
         client = prepared["client"]
-        now = utc_now()
+        diff = self._build_update_diff(recurrence, prepared)
         replace_item_ids: list[int] = []
         delete_failure_count = 0
-
-        for item in recurrence["items"]:
-            scheduled_for = self._parse_iso(item.get("scheduled_for"))
-            if not scheduled_for or scheduled_for < now:
-                continue
-            if item.get("status") == "canceled":
-                continue
-
-            canvas_topic_id = item.get("canvas_topic_id")
-            if canvas_topic_id:
-                try:
-                    client.delete_discussion_topic(
-                        course_ref=str(item.get("course_id") or item.get("course_ref")),
-                        topic_id=canvas_topic_id,
-                    )
-                except CanvasApiError:
-                    delete_failure_count += 1
-                    continue
-            replace_item_ids.append(int(item["item_id"]))
-
-        remaining_max_occurrence = max(
-            (
-                int(item.get("occurrence_index") or 0)
-                for item in recurrence["items"]
-                if int(item.get("item_id") or 0) not in set(replace_item_ids)
-            ),
-            default=0,
+        create_failure_count = 0
+        items: list[dict] = []
+        deleted_by_course = self._delete_future_items_for_courses(
+            client,
+            recurrence,
+            diff["delete_courses"],
         )
-        items, create_failure_count = self._create_canvas_items(
-            prepared,
-            occurrence_index_start=remaining_max_occurrence + 1,
+
+        for course_ref, result in deleted_by_course.items():
+            replace_item_ids.extend(result["deleted_item_ids"])
+            delete_failure_count += result["failure_count"]
+
+        remaining_max_occurrence_by_course = self._remaining_occurrence_max_by_course(
+            recurrence,
+            replace_item_ids,
         )
+        courses_by_ref = {course["course_ref"]: course for course in prepared["courses"]}
+        courses_to_create = diff["added_course_refs"] | {
+            course_ref
+            for course_ref in diff["updated_course_refs"]
+            if deleted_by_course.get(course_ref, {}).get("all_deleted", False)
+        }
+
+        for course_ref in sorted(courses_to_create):
+            course = courses_by_ref.get(course_ref)
+            if not course:
+                continue
+            course_items, failures = self._create_canvas_items_for_course(
+                prepared,
+                course,
+                occurrence_index_start=remaining_max_occurrence_by_course.get(course_ref, 0) + 1,
+            )
+            items.extend(course_items)
+            create_failure_count += failures
+
         updated = self.recurrence_repository.update_recurrence(
             recurrence_id,
             payload={
@@ -142,6 +164,7 @@ class AnnouncementRecurrenceService:
         )
         return {
             "item": updated,
+            "diff": self._serialize_edit_diff(diff),
             "replaced_count": len(replace_item_ids),
             "delete_failure_count": delete_failure_count,
             "created_count": len(items) - create_failure_count,
@@ -318,6 +341,14 @@ class AnnouncementRecurrenceService:
         return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
 
     @staticmethod
+    def _as_utc(value: datetime | None) -> datetime | None:
+        if value is None:
+            return None
+        if value.tzinfo is None:
+            return value.replace(tzinfo=UTC)
+        return value.astimezone(UTC)
+
+    @staticmethod
     def _render_template(template: str, **context: str | None) -> str:
         rendered = str(template or "")
         for key, value in context.items():
@@ -325,57 +356,217 @@ class AnnouncementRecurrenceService:
         return rendered
 
     def _create_canvas_items(self, prepared: dict, *, occurrence_index_start: int) -> tuple[list[dict], int]:
-        client = prepared["client"]
         items = []
         failure_count = 0
 
         for course in prepared["courses"]:
-            for schedule_offset, publish_at in enumerate(prepared["schedule"]):
-                occurrence_index = occurrence_index_start + schedule_offset
-                try:
-                    rendered_title = self._render_template(
-                        prepared["title"],
-                        course_name=course["course_name"],
-                        course_ref=course["course_ref"],
-                        course_code=course.get("course_code"),
-                    )
-                    rendered_message_html = self._render_template(
-                        prepared["message_html"],
-                        course_name=course["course_name"],
-                        course_ref=course["course_ref"],
-                        course_code=course.get("course_code"),
-                    )
-                    response = client.create_announcement(
-                        course_ref=str(course["course_id"]),
-                        title=rendered_title,
-                        message_html=rendered_message_html,
-                        published=True,
-                        delayed_post_at=publish_at.isoformat(),
-                        lock_comment=prepared["lock_comment"],
-                    )
-                    items.append(
-                        {
-                            "occurrence_index": occurrence_index,
-                            "course_ref_snapshot": course["course_ref"],
-                            "course_id_snapshot": course["course_id"],
-                            "course_name_snapshot": course["course_name"],
-                            "scheduled_for": publish_at,
-                            "canvas_topic_id": response.get("id"),
-                            "canvas_topic_url": response.get("html_url"),
-                            "status": "scheduled",
-                        }
-                    )
-                except Exception as exc:  # noqa: BLE001
-                    failure_count += 1
-                    items.append(
-                        {
-                            "occurrence_index": occurrence_index,
-                            "course_ref_snapshot": course["course_ref"],
-                            "course_id_snapshot": course["course_id"],
-                            "course_name_snapshot": course["course_name"],
-                            "scheduled_for": publish_at,
-                            "status": "error",
-                            "error_message": str(exc),
-                        }
-                    )
+            course_items, failures = self._create_canvas_items_for_course(
+                prepared,
+                course,
+                occurrence_index_start=occurrence_index_start,
+            )
+            items.extend(course_items)
+            failure_count += failures
         return items, failure_count
+
+    def _create_canvas_items_for_course(self, prepared: dict, course: dict, *, occurrence_index_start: int) -> tuple[list[dict], int]:
+        client = prepared["client"]
+        items = []
+        failure_count = 0
+        for schedule_offset, publish_at in enumerate(prepared["schedule"]):
+            occurrence_index = occurrence_index_start + schedule_offset
+            try:
+                rendered_title = self._render_template(
+                    prepared["title"],
+                    course_name=course["course_name"],
+                    course_ref=course["course_ref"],
+                    course_code=course.get("course_code"),
+                )
+                rendered_message_html = self._render_template(
+                    prepared["message_html"],
+                    course_name=course["course_name"],
+                    course_ref=course["course_ref"],
+                    course_code=course.get("course_code"),
+                )
+                response = client.create_announcement(
+                    course_ref=str(course["course_id"]),
+                    title=rendered_title,
+                    message_html=rendered_message_html,
+                    published=True,
+                    delayed_post_at=publish_at.isoformat(),
+                    lock_comment=prepared["lock_comment"],
+                )
+                items.append(
+                    {
+                        "occurrence_index": occurrence_index,
+                        "course_ref_snapshot": course["course_ref"],
+                        "course_id_snapshot": course["course_id"],
+                        "course_name_snapshot": course["course_name"],
+                        "scheduled_for": publish_at,
+                        "canvas_topic_id": response.get("id"),
+                        "canvas_topic_url": response.get("html_url"),
+                        "status": "scheduled",
+                    }
+                )
+            except Exception as exc:  # noqa: BLE001
+                failure_count += 1
+                items.append(
+                    {
+                        "occurrence_index": occurrence_index,
+                        "course_ref_snapshot": course["course_ref"],
+                        "course_id_snapshot": course["course_id"],
+                        "course_name_snapshot": course["course_name"],
+                        "scheduled_for": publish_at,
+                        "status": "error",
+                        "error_message": str(exc),
+                    }
+                )
+        return items, failure_count
+
+    def _build_update_diff(self, recurrence: dict, prepared: dict) -> dict:
+        now = utc_now()
+        future_items = [
+            item
+            for item in recurrence.get("items", [])
+            if (scheduled_for := self._parse_iso(item.get("scheduled_for")))
+            and scheduled_for >= now
+            and item.get("status") not in {"canceled"}
+        ]
+        future_by_course: dict[str, list[dict]] = {}
+        for item in future_items:
+            future_by_course.setdefault(str(item.get("course_ref") or ""), []).append(item)
+
+        current_course_refs = set(future_by_course.keys())
+        new_course_refs = {course["course_ref"] for course in prepared["courses"]}
+        recurrence_first_publish_at = self._as_utc(self._parse_iso(recurrence.get("first_publish_at")))
+        prepared_first_publish_at = self._as_utc(prepared["schedule"][0])
+        content_changed = any(
+            [
+                str(recurrence.get("title") or "") != prepared["title"],
+                str(recurrence.get("message_html") or "") != prepared["message_html"],
+                bool(recurrence.get("lock_comment")) != prepared["lock_comment"],
+                str(recurrence.get("recurrence_type") or "") != prepared["recurrence_type"],
+                int(recurrence.get("interval_value") or 1) != prepared["interval_value"],
+                int(recurrence.get("occurrence_count") or 1) != prepared["occurrence_count"],
+                recurrence_first_publish_at != prepared_first_publish_at,
+            ]
+        )
+
+        added_course_refs = new_course_refs - current_course_refs
+        removed_course_refs = current_course_refs - new_course_refs
+        kept_course_refs = current_course_refs & new_course_refs
+        updated_course_refs = kept_course_refs if content_changed else set()
+        unchanged_course_refs = kept_course_refs - updated_course_refs
+
+        course_name_lookup = {
+            str(item.get("course_ref") or item.get("course_id") or ""): item.get("course_name") or item.get("course_name_snapshot") or str(item.get("course_ref") or item.get("course_id") or "")
+            for item in recurrence.get("items", [])
+        }
+        for course in prepared["courses"]:
+            course_name_lookup[course["course_ref"]] = course["course_name"]
+
+        delete_courses = removed_course_refs | updated_course_refs
+        create_courses = added_course_refs | updated_course_refs
+        delete_items_expected = sum(len(future_by_course.get(course_ref, [])) for course_ref in delete_courses)
+        create_items_expected = len(prepared["schedule"]) * len(create_courses)
+
+        course_changes = []
+        for course_ref in sorted(new_course_refs | current_course_refs):
+            if course_ref in added_course_refs:
+                action = "add"
+            elif course_ref in removed_course_refs:
+                action = "remove"
+            elif course_ref in updated_course_refs:
+                action = "update"
+            else:
+                action = "keep"
+            course_changes.append(
+                {
+                    "course_ref": course_ref,
+                    "course_name": course_name_lookup.get(course_ref) or course_ref,
+                    "action": action,
+                    "future_items": len(future_by_course.get(course_ref, [])),
+                    "new_occurrences": len(prepared["schedule"]) if course_ref in create_courses else 0,
+                }
+            )
+
+        return {
+            "content_changed": content_changed,
+            "added_courses": len(added_course_refs),
+            "removed_courses": len(removed_course_refs),
+            "updated_courses": len(updated_course_refs),
+            "unchanged_courses": len(unchanged_course_refs),
+            "added_course_refs": added_course_refs,
+            "removed_course_refs": removed_course_refs,
+            "updated_course_refs": updated_course_refs,
+            "unchanged_course_refs": unchanged_course_refs,
+            "delete_courses": delete_courses,
+            "create_courses": create_courses,
+            "delete_items_expected": delete_items_expected,
+            "create_items_expected": create_items_expected,
+            "course_changes": course_changes,
+        }
+
+    def _delete_future_items_for_courses(self, client, recurrence: dict, course_refs: set[str]) -> dict[str, dict]:
+        now = utc_now()
+        results: dict[str, dict] = {}
+        if not course_refs:
+            return results
+        for course_ref in course_refs:
+            future_items = [
+                item
+                for item in recurrence.get("items", [])
+                if str(item.get("course_ref") or "") == course_ref
+                and (scheduled_for := self._parse_iso(item.get("scheduled_for")))
+                and scheduled_for >= now
+                and item.get("status") not in {"canceled"}
+            ]
+            deleted_item_ids: list[int] = []
+            failure_count = 0
+            for item in future_items:
+                canvas_topic_id = item.get("canvas_topic_id")
+                if canvas_topic_id:
+                    try:
+                        client.delete_discussion_topic(
+                            course_ref=str(item.get("course_id") or item.get("course_ref")),
+                            topic_id=canvas_topic_id,
+                        )
+                    except CanvasApiError:
+                        failure_count += 1
+                        continue
+                deleted_item_ids.append(int(item["item_id"]))
+            results[course_ref] = {
+                "deleted_item_ids": deleted_item_ids,
+                "failure_count": failure_count,
+                "all_deleted": len(deleted_item_ids) == len(future_items),
+                "future_items": len(future_items),
+            }
+        return results
+
+    def _remaining_occurrence_max_by_course(self, recurrence: dict, replace_item_ids: list[int]) -> dict[str, int]:
+        replaced = {int(item_id) for item_id in replace_item_ids}
+        result: dict[str, int] = {}
+        for item in recurrence.get("items", []):
+            item_id = int(item.get("item_id") or 0)
+            if item_id in replaced:
+                continue
+            course_ref = str(item.get("course_ref") or "")
+            result[course_ref] = max(result.get(course_ref, 0), int(item.get("occurrence_index") or 0))
+        return result
+
+    @staticmethod
+    def _serialize_edit_diff(diff: dict) -> dict:
+        return {
+            "content_changed": diff["content_changed"],
+            "added_courses": diff["added_courses"],
+            "removed_courses": diff["removed_courses"],
+            "updated_courses": diff["updated_courses"],
+            "unchanged_courses": diff["unchanged_courses"],
+            "added_course_refs": sorted(diff["added_course_refs"]),
+            "removed_course_refs": sorted(diff["removed_course_refs"]),
+            "updated_course_refs": sorted(diff["updated_course_refs"]),
+            "unchanged_course_refs": sorted(diff["unchanged_course_refs"]),
+            "delete_items_expected": diff["delete_items_expected"],
+            "create_items_expected": diff["create_items_expected"],
+            "course_changes": diff["course_changes"],
+        }

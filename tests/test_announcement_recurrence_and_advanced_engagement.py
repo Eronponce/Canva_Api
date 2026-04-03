@@ -275,6 +275,103 @@ def test_announcement_recurrence_update_replaces_future_topics(client, app, monk
     assert fake_client.announcements_created[-1]["title"] == "Encontro atualizado"
 
 
+def test_announcement_recurrence_preview_shows_course_diff(client, app, monkeypatch):
+    services = app.extensions["services"]
+    fake_client = FakeCanvasClient()
+    monkeypatch.setattr(services["connection_service"], "build_client", lambda payload: fake_client)
+
+    created = client.post(
+        "/api/announcement-recurrences",
+        json={
+            **_connection_payload(),
+            "target_mode": "courses",
+            "course_refs": ["101", "202"],
+            "name": "Base semanal",
+            "title": "Encontro semanal",
+            "message_html": "<p>Lembrete</p>",
+            "recurrence_type": "weekly",
+            "interval_value": 1,
+            "first_publish_at_local": "2030-05-01T19:00",
+            "occurrence_count": 2,
+            "lock_comment": True,
+        },
+    ).get_json()["item"]
+
+    preview_response = client.post(
+        "/api/announcement-recurrences/preview",
+        json={
+            **_connection_payload(),
+            "recurrence_id": created["id"],
+            "target_mode": "courses",
+            "course_refs": ["101"],
+            "name": "Base semanal",
+            "title": "Encontro semanal",
+            "message_html": "<p>Lembrete</p>",
+            "recurrence_type": "weekly",
+            "interval_value": 1,
+            "first_publish_at_local": "2030-05-01T19:00",
+            "occurrence_count": 2,
+            "lock_comment": True,
+        },
+    )
+    assert preview_response.status_code == 200
+    payload = preview_response.get_json()
+    assert payload["edit_diff"]["removed_courses"] == 1
+    assert payload["edit_diff"]["unchanged_courses"] == 1
+    assert payload["edit_diff"]["updated_courses"] == 0
+    assert payload["edit_diff"]["delete_items_expected"] == 2
+
+
+def test_announcement_recurrence_update_removes_only_deselected_course(client, app, monkeypatch):
+    services = app.extensions["services"]
+    fake_client = FakeCanvasClient()
+    monkeypatch.setattr(services["connection_service"], "build_client", lambda payload: fake_client)
+
+    created = client.post(
+        "/api/announcement-recurrences",
+        json={
+            **_connection_payload(),
+            "target_mode": "courses",
+            "course_refs": ["101", "202"],
+            "name": "Base semanal",
+            "title": "Encontro semanal",
+            "message_html": "<p>Lembrete</p>",
+            "recurrence_type": "weekly",
+            "interval_value": 1,
+            "first_publish_at_local": "2030-05-01T19:00",
+            "occurrence_count": 2,
+            "lock_comment": True,
+        },
+    ).get_json()["item"]
+
+    update_response = client.put(
+        f"/api/announcement-recurrences/{created['id']}",
+        json={
+            **_connection_payload(),
+            "target_mode": "courses",
+            "course_refs": ["101"],
+            "name": "Base semanal",
+            "title": "Encontro semanal",
+            "message_html": "<p>Lembrete</p>",
+            "recurrence_type": "weekly",
+            "interval_value": 1,
+            "first_publish_at_local": "2030-05-01T19:00",
+            "occurrence_count": 2,
+            "lock_comment": True,
+        },
+    )
+    assert update_response.status_code == 200
+    payload = update_response.get_json()
+    assert payload["diff"]["removed_courses"] == 1
+    assert payload["diff"]["unchanged_courses"] == 1
+    assert payload["created_count"] == 0
+    assert payload["failure_count"] == 0
+    assert len(fake_client.deleted_topics) == 2
+    assert all(item["course_ref"] == "202" for item in fake_client.deleted_topics)
+    assert len(fake_client.announcements_created) == 4
+    assert payload["item"]["future_items"] == 2
+
+
 def test_advanced_engagement_filters_use_enrollments(client, app, monkeypatch):
     services = app.extensions["services"]
     fake_client = FakeCanvasClient()
