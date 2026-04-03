@@ -220,11 +220,17 @@
               <label class="field">
                 <span>Titulo</span>
                 <input id="announcementTitle" type="text" placeholder="Atualizacao importante da disciplina">
+                {% raw %}
+                <small class="field-help">Placeholders disponiveis: {{course_name}}, {{course_ref}}, {{course_code}}</small>
+                {% endraw %}
               </label>
 
               <label class="field">
                 <span>Mensagem HTML simples</span>
                 <textarea id="announcementMessage" rows="12" placeholder="<p>Ola turma,</p><p>Segue o recado...</p>"></textarea>
+                {% raw %}
+                <small class="field-help">Use {{course_name}}, {{course_ref}} ou {{course_code}} para personalizar por disciplina.</small>
+                {% endraw %}
               </label>
 
               <label class="field">
@@ -438,11 +444,17 @@
               <label class="field">
                 <span>Titulo do aviso</span>
                 <input id="recurrenceTitle" type="text" placeholder="Encontro semanal da disciplina">
+                {% raw %}
+                <small class="field-help">Placeholders disponiveis: {{course_name}}, {{course_ref}}, {{course_code}}</small>
+                {% endraw %}
               </label>
 
               <label class="field">
                 <span>Mensagem HTML simples</span>
                 <textarea id="recurrenceMessage" rows="10" placeholder="<p>Ola turma,</p><p>Nosso encontro acontece hoje as 19h.</p>"></textarea>
+                {% raw %}
+                <small class="field-help">Use {{course_name}}, {{course_ref}} ou {{course_code}} para personalizar cada aviso por curso.</small>
+                {% endraw %}
               </label>
 
               <div class="field-grid">

@@ -10,6 +10,7 @@ Painel web local para operar em lote no Canvas LMS usando apenas endpoints ofici
 - publica comunicados em lote
 - publica comunicados em lote com anexo opcional
 - cria recorrencias de avisos no proprio Canvas
+- permite placeholders por disciplina em comunicados e avisos recorrentes (`{{course_name}}`, `{{course_ref}}`, `{{course_code}}`)
 - envia mensagens pela caixa de entrada do Canvas em lote com anexo opcional
 - envia mensagens para alunos inativos com base em analytics e progresso de modulos
 - prioriza turmas e alunos inativos por nivel de risco no preview antes do envio

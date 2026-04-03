@@ -101,6 +101,34 @@ def test_announcement_job_creates_report_and_history(app, monkeypatch):
     assert report_path.exists()
 
 
+def test_announcement_job_renders_course_placeholders(app, monkeypatch):
+    services = app.extensions["services"]
+    fake_client = FakeCanvasClient()
+    monkeypatch.setattr(services["connection_service"], "build_client", lambda payload: fake_client)
+
+    job_manager = services["job_manager"]
+    service = services["announcement_service"]
+    job = job_manager.create_job(kind="announcement", title="Aviso com placeholders")
+
+    service.run_job(
+        job["id"],
+        {
+            "base_url": "https://canvas.example.com",
+            "access_token": "token",
+            "course_ids_text": "101",
+            "title": "Aviso - {{course_name}}",
+            "message_html": "<p>{{course_code}} | {{course_ref}} | {{course_name}}</p>",
+            "publish_mode": "publish_now",
+            "lock_comment": False,
+            "dry_run": False,
+        },
+    )
+
+    created = fake_client.announcements_created[0]
+    assert created["title"] == "Aviso - Cálculo I"
+    assert created["message_html"] == "<p>MAT101 | 101 | Cálculo I</p>"
+
+
 def test_announcement_job_handles_course_failure(app, monkeypatch):
     services = app.extensions["services"]
     fake_client = FakeCanvasClient()

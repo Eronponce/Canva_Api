@@ -1254,12 +1254,15 @@ function renderReviewRecipientsSample(items) {
 function renderReviewMessage(kind, data) {
   const request = data?.request || {};
   if (kind === "announcement") {
+    const sampleCourse = firstReviewCourse(data?.courses || []);
+    const previewTitle = renderCourseTemplate(request.title || "-", sampleCourse);
+    const previewMessage = renderCourseTemplate(request.message_html || "<p></p>", sampleCourse);
     return `
       <div class="message-block">
-        <strong>${escapeHtml(request.title || "-")}</strong>
-        <div class="compact-meta">${escapeHtml(formatPublishMode(request.publish_mode || "publish_now"))}${request.schedule_at_local ? ` | ${escapeHtml(formatDateTime(request.schedule_at_local))}` : ""}</div>
+        <strong>${escapeHtml(previewTitle)}</strong>
+        <div class="compact-meta">${escapeHtml(formatPublishMode(request.publish_mode || "publish_now"))}${request.schedule_at_local ? ` | ${escapeHtml(formatDateTime(request.schedule_at_local))}` : ""}${sampleCourse ? ` | previa com ${escapeHtml(sampleCourse.course_name || sampleCourse.course_ref || "-")}` : ""}</div>
       </div>
-      <div class="message-block message-html">${request.message_html || "<p></p>"}</div>
+      <div class="message-block message-html">${previewMessage || "<p></p>"}</div>
       <div class="message-block">
         <div class="review-target-meta">
           <span>Bloquear comentarios: ${request.lock_comment ? "Sim" : "Nao"}</span>
@@ -2044,7 +2047,8 @@ function toggleScheduleField() {
 }
 
 function updateAnnouncementPreview() {
-  $("#announcementPreview").srcdoc = $("#announcementMessage").value.trim() || "<p></p>";
+  const previewCourse = firstTargetCourse("announcement");
+  $("#announcementPreview").srcdoc = renderCourseTemplate($("#announcementMessage").value.trim() || "<p></p>", previewCourse) || "<p></p>";
 }
 
 function updateAttachmentMeta(event) {
@@ -2069,6 +2073,30 @@ function formatFileSize(bytes) {
   if (size < 1024) return `${size} B`;
   if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
   return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function firstReviewCourse(courses) {
+  return (courses || []).find((item) => item.status === "ok") || courses?.[0] || null;
+}
+
+function firstTargetCourse(kind) {
+  const groupsCourses = selectedGroups(kind).flatMap((group) => group.courses || []);
+  const directCourses = selectedCourses(kind);
+  const pool = state[kind]?.mode === "courses" ? directCourses : groupsCourses;
+  return pool[0] || null;
+}
+
+function renderCourseTemplate(template, course) {
+  const context = {
+    course_name: course?.course_name || "Nome da disciplina",
+    course_ref: course?.course_ref || "0000",
+    course_code: course?.course_code || "CURSO000",
+  };
+  let rendered = String(template || "");
+  Object.entries(context).forEach(([key, value]) => {
+    rendered = rendered.replaceAll(`{{${key}}}`, String(value || ""));
+  });
+  return rendered;
 }
 
 function buildMultipartPayload(payload, fileInputSelector) {

@@ -96,6 +96,18 @@ class AnnouncementService:
 
                 try:
                     course = client.get_course(course_ref)
+                    rendered_title = self._render_template(
+                        title,
+                        course_name=course.get("name"),
+                        course_ref=course_ref,
+                        course_code=course.get("course_code"),
+                    )
+                    rendered_message_html = self._render_template(
+                        message_html,
+                        course_name=course.get("name"),
+                        course_ref=course_ref,
+                        course_code=course.get("course_code"),
+                    )
                     result_row = {
                         "course_ref": course_ref,
                         "course_id": course.get("id"),
@@ -120,8 +132,8 @@ class AnnouncementService:
                     else:
                         response = client.create_announcement(
                             course_ref=str(course.get("id")),
-                            title=title,
-                            message_html=message_html,
+                            title=rendered_title,
+                            message_html=rendered_message_html,
                             published=published,
                             delayed_post_at=delayed_post_at,
                             lock_comment=lock_comment,
@@ -343,3 +355,10 @@ class AnnouncementService:
                 "size": attachment["size"],
             }
         return data
+
+    @staticmethod
+    def _render_template(template: str, **context: str | None) -> str:
+        rendered = str(template or "")
+        for key, value in context.items():
+            rendered = rendered.replace(f"{{{{{key}}}}}", str(value or ""))
+        return rendered

@@ -151,6 +151,34 @@ def test_announcement_recurrence_preview_and_create(client, app, monkeypatch):
     assert payload["item"]["name"] == "Quinta 19h"
     assert payload["item"]["total_items"] == 4
     assert len(fake_client.announcements_created) == 4
+    assert fake_client.announcements_created[0]["title"] == "Encontro semanal"
+
+
+def test_announcement_recurrence_renders_course_placeholders(client, app, monkeypatch):
+    services = app.extensions["services"]
+    fake_client = FakeCanvasClient()
+    monkeypatch.setattr(services["connection_service"], "build_client", lambda payload: fake_client)
+
+    create_response = client.post(
+        "/api/announcement-recurrences",
+        json={
+            **_connection_payload(),
+            "target_mode": "courses",
+            "course_refs": ["101"],
+            "name": "Base disciplina",
+            "title": "Aviso - {{course_name}}",
+            "message_html": "<p>{{course_code}} | {{course_ref}} | {{course_name}}</p>",
+            "recurrence_type": "weekly",
+            "interval_value": 1,
+            "first_publish_at_local": "2030-05-01T19:00",
+            "occurrence_count": 1,
+            "lock_comment": False,
+        },
+    )
+
+    assert create_response.status_code == 201
+    assert fake_client.announcements_created[0]["title"] == "Aviso - Calculo I"
+    assert fake_client.announcements_created[0]["message_html"] == "<p>MAT101 | 101 | Calculo I</p>"
 
 
 def test_announcement_recurrence_cancel_removes_future_topics(client, app, monkeypatch):

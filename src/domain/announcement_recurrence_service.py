@@ -54,10 +54,22 @@ class AnnouncementRecurrenceService:
         for course in prepared["courses"]:
             for occurrence_index, publish_at in enumerate(prepared["schedule"], start=1):
                 try:
+                    rendered_title = self._render_template(
+                        prepared["title"],
+                        course_name=course["course_name"],
+                        course_ref=course["course_ref"],
+                        course_code=course.get("course_code"),
+                    )
+                    rendered_message_html = self._render_template(
+                        prepared["message_html"],
+                        course_name=course["course_name"],
+                        course_ref=course["course_ref"],
+                        course_code=course.get("course_code"),
+                    )
                     response = client.create_announcement(
                         course_ref=str(course["course_id"]),
-                        title=prepared["title"],
-                        message_html=prepared["message_html"],
+                        title=rendered_title,
+                        message_html=rendered_message_html,
                         published=True,
                         delayed_post_at=publish_at.isoformat(),
                         lock_comment=prepared["lock_comment"],
@@ -281,3 +293,10 @@ class AnnouncementRecurrenceService:
         if not value:
             return None
         return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+
+    @staticmethod
+    def _render_template(template: str, **context: str | None) -> str:
+        rendered = str(template or "")
+        for key, value in context.items():
+            rendered = rendered.replace(f"{{{{{key}}}}}", str(value or ""))
+        return rendered
