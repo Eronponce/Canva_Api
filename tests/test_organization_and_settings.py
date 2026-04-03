@@ -301,6 +301,35 @@ def test_announcement_job_route_accepts_multipart_attachment(app, monkeypatch):
     assert captured["payload"]["attachment_temp_path"]
 
 
+def test_announcement_preflight_returns_course_summary(app, monkeypatch):
+    client = app.test_client()
+    services = app.extensions["services"]
+    monkeypatch.setattr(services["connection_service"], "build_client", lambda payload: FakeCourseLookupClient())
+    services["course_service"].add_registered_course(
+        {"course_ref": "101", "base_url": "https://canvas.example.com", "access_token": "token"}
+    )
+
+    response = client.post(
+        "/api/announcements/preflight",
+        json={
+            "base_url": "https://canvas.example.com",
+            "access_token": "token",
+            "target_mode": "courses",
+            "course_refs": ["101"],
+            "title": "Aviso",
+            "message_html": "<p>Teste</p>",
+            "publish_mode": "publish_now",
+            "lock_comment": True,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["summary"]["courses_requested"] == 1
+    assert payload["summary"]["success_count"] == 1
+    assert payload["courses"][0]["course_name"] == "Curso 101"
+
+
 def test_message_job_route_resolves_all_groups_without_duplicates(app, monkeypatch):
     client = app.test_client()
     services = app.extensions["services"]

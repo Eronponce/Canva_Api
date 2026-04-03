@@ -222,6 +222,68 @@ class AnnouncementService:
         finally:
             delete_temp_file((attachment or {}).get("temp_path"))
 
+    def preview_job(self, payload: dict) -> dict:
+        course_refs = parse_course_references(payload.get("course_ids_text", ""))
+        title = (payload.get("title") or "").strip()
+        message_html = (payload.get("message_html") or "").strip()
+        publish_mode = payload.get("publish_mode") or "publish_now"
+        client_timezone = payload.get("client_timezone")
+        attachment = self._attachment_payload(payload)
+
+        if not course_refs:
+            raise ValueError("Selecione ao menos uma turma para revisar o comunicado.")
+        if not title:
+            raise ValueError("Informe o titulo do comunicado.")
+        if not message_html:
+            raise ValueError("Informe a mensagem HTML do comunicado.")
+
+        delayed_post_at = None
+        if publish_mode == "schedule":
+            delayed_post_at = parse_schedule_datetime(payload.get("schedule_at_local", ""), client_timezone)
+            if not delayed_post_at:
+                raise ValueError("Informe a data e hora do agendamento.")
+
+        client = self.connection_service.build_client(payload)
+        courses = []
+        for course_ref in course_refs:
+            try:
+                course = client.get_course(course_ref)
+                courses.append(
+                    {
+                        "course_ref": str(course_ref),
+                        "course_id": course.get("id"),
+                        "course_name": course.get("name") or str(course_ref),
+                        "course_code": course.get("course_code") or "",
+                        "status": "ok",
+                    }
+                )
+            except Exception as exc:  # noqa: BLE001
+                courses.append(
+                    {
+                        "course_ref": str(course_ref),
+                        "course_id": None,
+                        "course_name": "",
+                        "course_code": "",
+                        "status": "error",
+                        "error": str(exc),
+                    }
+                )
+
+        return {
+            "summary": {
+                "courses_requested": len(course_refs),
+                "success_count": len([item for item in courses if item["status"] == "ok"]),
+                "failure_count": len([item for item in courses if item["status"] == "error"]),
+                "publish_mode": publish_mode,
+                "delayed_post_at": delayed_post_at,
+                "lock_comment": bool(payload.get("lock_comment")),
+                "dry_run": bool(payload.get("dry_run")),
+                "has_attachment": bool(attachment),
+                "attachment_name": attachment["original_name"] if attachment else "",
+            },
+            "courses": courses,
+        }
+
     def _write_report(self, job_id: str, rows: list[dict]) -> str:
         report_filename = f"announcement-report-{job_id}.csv"
         report_path = Path(self.app_config.reports_dir) / report_filename

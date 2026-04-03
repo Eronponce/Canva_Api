@@ -12,6 +12,7 @@ Painel web local para operar em lote no Canvas LMS usando apenas endpoints ofici
 - cria recorrencias de avisos no proprio Canvas
 - envia mensagens pela caixa de entrada do Canvas em lote com anexo opcional
 - envia mensagens para alunos inativos com base em analytics e progresso de modulos
+- revisa o alvo antes do envio em comunicados, caixa de entrada e inativos
 - registra historico, resultados por turma e exportacao em CSV
 - permite limpar todo o banco local com confirmacao digitada
 
@@ -33,6 +34,22 @@ Painel web local para operar em lote no Canvas LMS usando apenas endpoints ofici
    resumo operacional, editor do `.env` e zona de perigo
 8. `Relatorios`
    historico, analitico e download de CSV
+
+## Revisao antes do envio
+
+Antes de disparar um lote real, o painel abre uma revisao com:
+
+- resumo do envio
+- turmas alvo
+- amostra de destinatarios quando aplicavel
+- mensagem que sera enviada
+- modo de publicacao, estrategia, criterio e anexo
+
+Isso vale para:
+
+- `Comunicados`
+- `Caixa de entrada`
+- `Inativos`
 
 ## Como funciona a Recorrencia
 

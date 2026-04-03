@@ -242,6 +242,25 @@ def create_announcement_job():
     return jsonify({"job": job}), 202
 
 
+@web.post("/api/announcements/preflight")
+def preview_announcement_job():
+    raw_payload = _request_payload()
+    uploaded_file = request.files.get("attachment")
+    if uploaded_file and uploaded_file.filename:
+        raw_payload = {
+            **raw_payload,
+            "attachment_name": uploaded_file.filename,
+            "attachment_content_type": uploaded_file.mimetype or "application/octet-stream",
+            "attachment_size": getattr(uploaded_file, "content_length", None) or 0,
+        }
+    payload, _course_refs = _with_resolved_courses(
+        raw_payload,
+        "Selecione ao menos um grupo ou curso para revisar o comunicado.",
+    )
+    result = services()["announcement_service"].preview_job(payload)
+    return jsonify(result)
+
+
 @web.post("/api/messages/jobs")
 def create_message_job():
     raw_payload = _request_payload()

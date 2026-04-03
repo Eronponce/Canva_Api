@@ -19,6 +19,10 @@ const state = {
   envRevealTimer: null,
   activeGroupId: null,
   groupModalCourseRefs: [],
+  review: {
+    kind: null,
+    data: null,
+  },
   selectedReportId: null,
   pickerSearch: {},
   pickerReorder: {},
@@ -128,10 +132,21 @@ function bindEvents() {
       closeGroupModal();
     }
   });
+  $("#closeSendReviewModalBtn").addEventListener("click", closeSendReviewModal);
+  $("#cancelSendReviewBtn").addEventListener("click", closeSendReviewModal);
+  $("#confirmSendReviewBtn").addEventListener("click", confirmReviewedSend);
+  $("#sendReviewModal").addEventListener("click", (event) => {
+    if (event.target.dataset.action === "close-send-review-modal") {
+      closeSendReviewModal();
+    }
+  });
 
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && !$("#groupModal").classList.contains("hidden")) {
       closeGroupModal();
+    }
+    if (event.key === "Escape" && !$("#sendReviewModal").classList.contains("hidden")) {
+      closeSendReviewModal();
     }
   });
 
@@ -566,6 +581,16 @@ function showModalNotice(message, type = "info") {
 
 function hideModalNotice() {
   $("#groupModalNotice").className = "notice hidden";
+}
+
+function showSendReviewNotice(message, type = "info") {
+  const notice = $("#sendReviewNotice");
+  notice.textContent = message;
+  notice.className = `notice notice-${type}`;
+}
+
+function hideSendReviewNotice() {
+  $("#sendReviewNotice").className = "notice hidden";
 }
 
 function setBusy(button, isBusy, busyText = "Processando...") {
@@ -1064,6 +1089,225 @@ function closeGroupModal() {
   $("#groupModal").setAttribute("aria-hidden", "true");
   $("#groupName").value = "";
   $("#groupDescription").value = "";
+}
+
+function openSendReviewModal(kind, data) {
+  state.review = { kind, data };
+  $("#sendReviewTitle").textContent = reviewTitle(kind);
+  $("#sendReviewSubtitle").textContent = reviewSubtitle(kind);
+  $("#sendReviewTargetSubtitle").textContent = reviewTargetSubtitle(kind);
+  $("#sendReviewMessageSubtitle").textContent = reviewMessageSubtitle(kind);
+  $("#confirmSendReviewBtn").textContent = reviewConfirmLabel(kind);
+  $("#sendReviewSummary").innerHTML = renderReviewSummary(kind, data);
+  $("#sendReviewTargets").innerHTML = renderReviewTargets(kind, data);
+  $("#sendReviewMessage").innerHTML = renderReviewMessage(kind, data);
+  hideSendReviewNotice();
+  $("#sendReviewModal").classList.remove("hidden");
+  $("#sendReviewModal").setAttribute("aria-hidden", "false");
+}
+
+function closeSendReviewModal() {
+  state.review = { kind: null, data: null };
+  hideSendReviewNotice();
+  $("#sendReviewModal").classList.add("hidden");
+  $("#sendReviewModal").setAttribute("aria-hidden", "true");
+  $("#sendReviewSummary").innerHTML = "";
+  $("#sendReviewTargets").innerHTML = "Nenhum alvo carregado.";
+  $("#sendReviewMessage").innerHTML = "Nenhum conteudo carregado.";
+}
+
+function reviewTitle(kind) {
+  if (kind === "announcement") return "Revisar comunicado";
+  if (kind === "message") return "Revisar caixa de entrada";
+  return "Revisar mensagem para inativos";
+}
+
+function reviewSubtitle(kind) {
+  if (kind === "announcement") return "Confira turmas, agendamento e conteudo antes de criar o lote.";
+  if (kind === "message") return "Confira turmas, destinatarios e estrategia antes de disparar.";
+  return "Confira o filtro de inatividade e os alunos alvo antes de enviar.";
+}
+
+function reviewTargetSubtitle(kind) {
+  if (kind === "announcement") return "Turmas que receberao o comunicado.";
+  if (kind === "message") return "Turmas e alunos que entrarao no lote.";
+  return "Turmas e alunos inativos encontrados.";
+}
+
+function reviewMessageSubtitle(kind) {
+  if (kind === "announcement") return "HTML, modo de publicacao e anexo.";
+  if (kind === "message") return "Assunto, corpo e anexo opcional.";
+  return "Assunto, corpo e criterio aplicado.";
+}
+
+function reviewConfirmLabel(kind) {
+  if (kind === "announcement") return "Confirmar comunicado";
+  if (kind === "message") return "Confirmar envio";
+  return "Confirmar envio para inativos";
+}
+
+function renderReviewSummary(kind, data) {
+  const summary = data?.summary || {};
+  const request = data?.request || {};
+  let cards = [];
+  if (kind === "announcement") {
+    cards = [
+      metricCard("Turmas", summary.courses_requested || 0),
+      metricCard("Resolvidas", summary.success_count || 0),
+      metricCard("Falhas", summary.failure_count || 0),
+      metricCard("Publicacao", formatPublishMode(summary.publish_mode || request.publish_mode || "publish_now")),
+      metricCard("Anexo", summary.attachment_name || request.attachment_name || "Sem anexo"),
+      metricCard("Modo teste", (summary.dry_run || request.dry_run) ? "Sim" : "Nao"),
+    ];
+  } else if (kind === "message") {
+    cards = [
+      metricCard("Turmas", (data.courses || []).length),
+      metricCard("Alunos encontrados", summary.total_students_found || 0),
+      metricCard("Destinatarios unicos", summary.unique_recipients || 0),
+      metricCard("Estrategia", request.strategy === "context" ? "Contexto" : "Usuarios"),
+      metricCard("Deduplicar", request.dedupe ? "Sim" : "Nao"),
+      metricCard("Anexo", request.attachment_name || "Sem anexo"),
+    ];
+  } else {
+    cards = [
+      metricCard("Turmas", (data.courses || []).length),
+      metricCard("Alunos analisados", summary.total_students_found || 0),
+      metricCard("Alvos", summary.total_matched_students || 0),
+      metricCard("Sem acesso", summary.total_never_accessed_matches || 0),
+      metricCard("Pendencias", summary.total_incomplete_resources_matches || 0),
+      metricCard("Criterio", formatCriteriaMode(request.criteria_mode || "")),
+    ];
+  }
+  return cards.join("");
+}
+
+function renderReviewTargets(kind, data) {
+  if (kind === "announcement") {
+    const courses = data.courses || [];
+    if (!courses.length) return `<div class="empty-state">Nenhuma turma encontrada.</div>`;
+    return courses.map((course) => `
+      <div class="history-item">
+        <div class="history-item-header">
+          <div>
+            <strong>${escapeHtml(course.course_name || course.course_ref || "-")}</strong>
+            <div class="compact-meta mono">${escapeHtml(String(course.course_id || course.course_ref || "-"))}${course.course_code ? ` | ${escapeHtml(course.course_code)}` : ""}</div>
+          </div>
+          <div class="history-actions">${statusChip(course.status === "ok" ? "success" : "error")}</div>
+        </div>
+        ${course.error ? `<div class="compact-meta text-danger">${escapeHtml(course.error)}</div>` : ""}
+      </div>
+    `).join("");
+  }
+
+  if (kind === "message") {
+    const courses = data.courses || [];
+    if (!courses.length) return `<div class="empty-state">Nenhuma turma encontrada.</div>`;
+    return courses.map((course) => `
+      <div class="history-item">
+        <div class="history-item-header">
+          <div>
+            <strong>${escapeHtml(course.course_name || course.course_ref || "-")}</strong>
+            <div class="compact-meta mono">${escapeHtml(String(course.course_id || course.course_ref || "-"))}</div>
+          </div>
+          <div class="history-actions"><span class="chip">${escapeHtml(String(course.students_found || 0))} aluno(s)</span></div>
+        </div>
+      </div>
+    `).join("") + renderReviewRecipientsSample(data.items || []);
+  }
+
+  const courses = data.courses || [];
+  if (!courses.length) return `<div class="empty-state">Nenhuma turma encontrada.</div>`;
+  return courses.map((course) => `
+    <div class="history-item">
+      <div class="history-item-header">
+        <div>
+          <strong>${escapeHtml(course.course_name || course.course_ref || "-")}</strong>
+          <div class="compact-meta mono">${escapeHtml(String(course.course_id || course.course_ref || "-"))}</div>
+        </div>
+        <div class="history-actions"><span class="chip">${escapeHtml(String(course.matched_students || 0))} alvo(s)</span></div>
+      </div>
+      <div class="review-target-meta">
+        <span>Sem acesso: ${escapeHtml(String(course.never_accessed_matches || 0))}</span>
+        <span>Pendentes: ${escapeHtml(String(course.incomplete_resources_matches || 0))}</span>
+        <span>Sem atividade: ${escapeHtml(String(course.inactive_days_matches || 0))}</span>
+      </div>
+    </div>
+  `).join("") + renderReviewRecipientsSample(data.items || []);
+}
+
+function renderReviewRecipientsSample(items) {
+  if (!items.length) return "";
+  const sample = items.slice(0, 12);
+  return `
+    <div class="history-item">
+      <div class="history-item-header">
+        <div>
+          <strong>Amostra de destinatarios</strong>
+          <div class="compact-meta">${escapeHtml(String(sample.length))} exibido(s)</div>
+        </div>
+      </div>
+      <div class="chips">${sample.map((item) => `<span class="chip">${escapeHtml(item.student_name || item.name || `Usuario ${item.user_id || "-"}`)}</span>`).join("")}</div>
+    </div>
+  `;
+}
+
+function renderReviewMessage(kind, data) {
+  const request = data?.request || {};
+  if (kind === "announcement") {
+    return `
+      <div class="message-block">
+        <strong>${escapeHtml(request.title || "-")}</strong>
+        <div class="compact-meta">${escapeHtml(formatPublishMode(request.publish_mode || "publish_now"))}${request.schedule_at_local ? ` | ${escapeHtml(formatDateTime(request.schedule_at_local))}` : ""}</div>
+      </div>
+      <div class="message-block message-html">${request.message_html || "<p></p>"}</div>
+      <div class="message-block">
+        <div class="review-target-meta">
+          <span>Bloquear comentarios: ${request.lock_comment ? "Sim" : "Nao"}</span>
+          <span>Modo teste: ${request.dry_run ? "Sim" : "Nao"}</span>
+          <span>Anexo: ${escapeHtml(request.attachment_name || "Sem anexo")}</span>
+        </div>
+      </div>
+    `;
+  }
+
+  if (kind === "message") {
+    return `
+      <div class="message-block">
+        <strong>${escapeHtml(request.subject || "-")}</strong>
+        <div class="review-target-meta">
+          <span>Estrategia: ${escapeHtml(request.strategy === "context" ? "Contexto da turma" : "Usuarios")}</span>
+          <span>Deduplicar: ${request.dedupe ? "Sim" : "Nao"}</span>
+          <span>Modo teste: ${request.dry_run ? "Sim" : "Nao"}</span>
+          <span>Anexo: ${escapeHtml(request.attachment_name || "Sem anexo")}</span>
+        </div>
+      </div>
+      <div class="message-block"><pre>${escapeHtml(request.message || "")}</pre></div>
+    `;
+  }
+
+  return `
+    <div class="message-block">
+      <strong>${escapeHtml(request.subject || "-")}</strong>
+      <div class="review-target-meta">
+        <span>Criterio: ${escapeHtml(formatCriteriaMode(request.criteria_mode || ""))}</span>
+        <span>Modo teste: ${request.dry_run ? "Sim" : "Nao"}</span>
+      </div>
+    </div>
+    <div class="message-block"><pre>${escapeHtml(request.message || "")}</pre></div>
+  `;
+}
+
+function formatPublishMode(mode) {
+  if (mode === "draft") return "Rascunho";
+  if (mode === "schedule") return "Agendado";
+  return "Imediato";
+}
+
+function formatCriteriaMode(mode) {
+  if (mode === "never_accessed") return "Sem acesso nenhum";
+  if (mode === "incomplete_resources") return "Com recursos pendentes";
+  if (mode === "never_accessed_or_incomplete_resources") return "Sem acesso ou pendencias";
+  return mode || "-";
 }
 
 async function saveGroup() {
@@ -1607,6 +1851,43 @@ function buildMessageRequestBody() {
   };
 }
 
+function buildAnnouncementRequestBody() {
+  return {
+    ...getConnectionPayload(),
+    ...getTargetPayload("announcement"),
+    title: $("#announcementTitle").value.trim(),
+    message_html: $("#announcementMessage").value.trim(),
+    publish_mode: $("#publishMode").value,
+    schedule_at_local: $("#announcementScheduleAt").value,
+    client_timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    lock_comment: $("#lockComment").checked,
+    dry_run: $("#announcementDryRun").checked,
+  };
+}
+
+function validateAnnouncementForm() {
+  if (!ensureConnectionConfigured() || !ensureTargetSelection("announcement")) return false;
+  if (!$("#announcementTitle").value.trim()) {
+    markInvalid("#announcementTitle");
+    focusField("#announcementTitle");
+    showNotice("Informe o titulo do comunicado.", "error");
+    return false;
+  }
+  if (!$("#announcementMessage").value.trim()) {
+    markInvalid("#announcementMessage");
+    focusField("#announcementMessage");
+    showNotice("Informe a mensagem HTML do comunicado.", "error");
+    return false;
+  }
+  if ($("#publishMode").value === "schedule" && !$("#announcementScheduleAt").value) {
+    markInvalid("#announcementScheduleAt");
+    focusField("#announcementScheduleAt");
+    showNotice("Informe a data e hora do agendamento.", "error");
+    return false;
+  }
+  return true;
+}
+
 function buildEngagementRequestBody() {
   return {
     ...getConnectionPayload(),
@@ -1799,46 +2080,23 @@ function buildMultipartPayload(payload, fileInputSelector) {
 async function submitAnnouncementJob(event) {
   event.preventDefault();
   const button = $("#announcementForm button[type='submit']");
-  setBusy(button, true, "Enfileirando...");
+  setBusy(button, true, "Revisando...");
   hideNotice();
   clearFieldValidation();
   try {
-    if (!ensureConnectionConfigured() || !ensureTargetSelection("announcement")) return;
-    if (!$("#announcementTitle").value.trim()) {
-      markInvalid("#announcementTitle");
-      focusField("#announcementTitle");
-      showNotice("Informe o titulo do comunicado.", "error");
-      return;
-    }
-    if (!$("#announcementMessage").value.trim()) {
-      markInvalid("#announcementMessage");
-      focusField("#announcementMessage");
-      showNotice("Informe a mensagem HTML do comunicado.", "error");
-      return;
-    }
-    if ($("#publishMode").value === "schedule" && !$("#announcementScheduleAt").value) {
-      markInvalid("#announcementScheduleAt");
-      focusField("#announcementScheduleAt");
-      showNotice("Informe a data e hora do agendamento.", "error");
-      return;
-    }
-    const response = await apiFetch("/api/announcements/jobs", {
+    if (!validateAnnouncementForm()) return;
+    const requestBody = buildAnnouncementRequestBody();
+    const response = await apiFetch("/api/announcements/preflight", {
       method: "POST",
-      body: buildMultipartPayload({
-        ...getConnectionPayload(),
-        ...getTargetPayload("announcement"),
-        title: $("#announcementTitle").value.trim(),
-        message_html: $("#announcementMessage").value.trim(),
-        publish_mode: $("#publishMode").value,
-        schedule_at_local: $("#announcementScheduleAt").value,
-        client_timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-        lock_comment: $("#lockComment").checked,
-        dry_run: $("#announcementDryRun").checked,
-      }, "#announcementAttachment"),
+      body: buildMultipartPayload(requestBody, "#announcementAttachment"),
     });
-    renderAnnouncementJob(response.job);
-    startPolling(response.job.id, "announcement");
-    showNotice("Lote de comunicados enfileirado.", "success");
+    openSendReviewModal("announcement", {
+      ...response,
+      request: {
+        ...requestBody,
+        attachment_name: $("#announcementAttachment").files?.[0]?.name || "",
+      },
+    });
   } catch (error) {
     showNotice(error.message, "error");
   } finally {
@@ -1849,18 +2107,27 @@ async function submitAnnouncementJob(event) {
 async function submitMessageJob(event) {
   event.preventDefault();
   const button = $("#messageForm button[type='submit']");
-  setBusy(button, true, "Enfileirando...");
+  setBusy(button, true, "Revisando...");
   hideNotice();
   clearFieldValidation();
   try {
     if (!validateMessageForm()) return;
-    const response = await apiFetch("/api/messages/jobs", {
+    const requestBody = buildMessageRequestBody();
+    const response = await apiFetch("/api/messages/recipients", {
       method: "POST",
-      body: buildMultipartPayload(buildMessageRequestBody(), "#messageAttachment"),
+      body: requestBody,
     });
-    renderMessageJob(response.job);
-    startPolling(response.job.id, "message");
-    showNotice("Lote de caixa de entrada enfileirado.", "success");
+    openSendReviewModal("message", {
+      ...response,
+      request: {
+        ...requestBody,
+        attachment_name: $("#messageAttachment").files?.[0]?.name || "",
+      },
+      summary: {
+        total_students_found: response.total_students_found || 0,
+        unique_recipients: response.unique_recipients || 0,
+      },
+    });
   } catch (error) {
     showNotice(error.message, "error");
   } finally {
@@ -1871,23 +2138,83 @@ async function submitMessageJob(event) {
 async function submitEngagementJob(event) {
   event.preventDefault();
   const button = $("#engagementForm button[type='submit']");
-  setBusy(button, true, "Enfileirando...");
+  setBusy(button, true, "Revisando...");
   hideNotice();
   clearFieldValidation();
   try {
     if (!validateEngagementForm()) return;
-    const response = await apiFetch("/api/engagement/jobs", {
+    const requestBody = buildEngagementRequestBody();
+    const response = await apiFetch("/api/engagement/inactive-targets", {
       method: "POST",
-      body: buildEngagementRequestBody(),
+      body: {
+        ...getConnectionPayload(),
+        ...getTargetPayload("engagement"),
+        criteria_mode: $("#engagementCriteriaMode").value,
+        criteria_config: collectEngagementCriteriaConfig(),
+      },
     });
-    renderEngagementJob(response.job);
-    startPolling(response.job.id, "engagement");
-    showNotice("Lote de mensagens para alunos inativos enfileirado.", "success");
+    state.engagement.preview = response;
+    renderTargetSummary("engagement");
+    renderEngagementPreview(response);
+    openSendReviewModal("engagement", {
+      ...response,
+      request: requestBody,
+    });
   } catch (error) {
     showNotice(error.message, "error");
   } finally {
     setBusy(button, false);
   }
+}
+
+async function confirmReviewedSend() {
+  const button = $("#confirmSendReviewBtn");
+  setBusy(button, true, "Enviando...");
+  hideSendReviewNotice();
+  try {
+    if (state.review.kind === "announcement") {
+      await executeAnnouncementJob();
+    } else if (state.review.kind === "message") {
+      await executeMessageJob();
+    } else if (state.review.kind === "engagement") {
+      await executeEngagementJob();
+    }
+    closeSendReviewModal();
+  } catch (error) {
+    showSendReviewNotice(error.message, "error");
+  } finally {
+    setBusy(button, false);
+  }
+}
+
+async function executeAnnouncementJob() {
+  const response = await apiFetch("/api/announcements/jobs", {
+    method: "POST",
+    body: buildMultipartPayload(buildAnnouncementRequestBody(), "#announcementAttachment"),
+  });
+  renderAnnouncementJob(response.job);
+  startPolling(response.job.id, "announcement");
+  showNotice("Lote de comunicados enfileirado.", "success");
+}
+
+async function executeMessageJob() {
+  const response = await apiFetch("/api/messages/jobs", {
+    method: "POST",
+    body: buildMultipartPayload(buildMessageRequestBody(), "#messageAttachment"),
+  });
+  renderMessageJob(response.job);
+  startPolling(response.job.id, "message");
+  showNotice("Lote de caixa de entrada enfileirado.", "success");
+}
+
+async function executeEngagementJob() {
+  const response = await apiFetch("/api/engagement/jobs", {
+    method: "POST",
+    body: buildEngagementRequestBody(),
+  });
+  renderEngagementJob(response.job);
+  startPolling(response.job.id, "engagement");
+  showNotice("Lote de mensagens para alunos inativos enfileirado.", "success");
 }
 
 async function submitRecurrence(event) {

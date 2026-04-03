@@ -834,5 +834,49 @@
       </div>
     </div>
   </div>
+
+  <div id="sendReviewModal" class="modal hidden" aria-hidden="true">
+    <div class="modal-backdrop" data-action="close-send-review-modal"></div>
+    <div class="modal-dialog modal-wide">
+      <div class="card-header">
+        <div>
+          <h2 id="sendReviewTitle">Revisar envio</h2>
+          <p id="sendReviewSubtitle">Confira o alvo e confirme antes de disparar o lote.</p>
+        </div>
+        <button id="closeSendReviewModalBtn" class="mini-btn ghost" type="button">Fechar</button>
+      </div>
+
+      <div id="sendReviewNotice" class="notice hidden"></div>
+
+      <div class="summary-grid" id="sendReviewSummary"></div>
+
+      <div class="review-grid">
+        <article class="card review-card">
+          <div class="card-header compact-header">
+            <div>
+              <h3>Alvo do envio</h3>
+              <p id="sendReviewTargetSubtitle">Quem vai entrar no lote.</p>
+            </div>
+          </div>
+          <div id="sendReviewTargets" class="compact-list empty-state">Nenhum alvo carregado.</div>
+        </article>
+
+        <article class="card review-card">
+          <div class="card-header compact-header">
+            <div>
+              <h3>Mensagem</h3>
+              <p id="sendReviewMessageSubtitle">Resumo do conteudo que sera enviado.</p>
+            </div>
+          </div>
+          <div id="sendReviewMessage" class="review-message-box empty-state">Nenhum conteudo carregado.</div>
+        </article>
+      </div>
+
+      <div class="button-row">
+        <button id="confirmSendReviewBtn" class="btn btn-primary" type="button">Confirmar envio</button>
+        <button id="cancelSendReviewBtn" class="btn btn-secondary" type="button">Cancelar</button>
+      </div>
+    </div>
+  </div>
 </body>
 </html>
