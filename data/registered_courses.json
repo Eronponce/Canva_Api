@@ -1,33 +1,5 @@
 [
   {
-    "course_ref": "33960",
-    "created_at": "2026-04-02T20:09:10Z"
-  },
-  {
-    "course_ref": "33923",
-    "created_at": "2026-04-02T20:09:14Z"
-  },
-  {
-    "course_ref": "34049",
-    "created_at": "2026-04-02T20:09:17Z"
-  },
-  {
-    "course_ref": "34027",
-    "created_at": "2026-04-02T20:09:21Z"
-  },
-  {
-    "course_ref": "33956",
-    "created_at": "2026-04-02T20:09:23Z"
-  },
-  {
-    "course_ref": "34052",
-    "created_at": "2026-04-02T20:09:30Z"
-  },
-  {
-    "course_ref": "34053",
-    "created_at": "2026-04-02T20:09:35Z"
-  },
-  {
     "course_ref": "33860",
     "canvas_course_id": 33860,
     "course_name": "INTRODUCAO AO PYTHON",
@@ -56,5 +28,75 @@
     "workflow_state": "available",
     "created_at": "2026-04-02T20:36:22Z",
     "updated_at": "2026-04-02T20:36:22Z"
+  },
+  {
+    "course_ref": "33923",
+    "canvas_course_id": 33923,
+    "course_name": "TECNICAS AVANCADAS DE MACHINE LEARNING A REDES NEURAIS",
+    "course_code": "CIA@1030",
+    "term_name": "Periodo: 20254.GRAD-EAD.6",
+    "workflow_state": "available",
+    "created_at": "2026-04-02T23:09:38Z",
+    "updated_at": "2026-04-02T23:09:38Z"
+  },
+  {
+    "course_ref": "33956",
+    "canvas_course_id": 33956,
+    "course_name": "INTRODUCAO A CIENCIA DE DADOS",
+    "course_code": "CIA@2010",
+    "term_name": "Periodo: 20254.GRAD-EAD.6",
+    "workflow_state": "available",
+    "created_at": "2026-04-02T23:34:47Z",
+    "updated_at": "2026-04-02T23:34:47Z"
+  },
+  {
+    "course_ref": "33960",
+    "canvas_course_id": 33960,
+    "course_name": "BIG DATA",
+    "course_code": "CIA@1029",
+    "term_name": "Periodo: 20254.GRAD-EAD.6",
+    "workflow_state": "available",
+    "created_at": "2026-04-02T23:34:55Z",
+    "updated_at": "2026-04-02T23:34:55Z"
+  },
+  {
+    "course_ref": "34027",
+    "canvas_course_id": 34027,
+    "course_name": "VISUALIZACAO DE DADOS",
+    "course_code": "CIA@2018",
+    "term_name": "Periodo: 20254.GRAD-EAD.6",
+    "workflow_state": "available",
+    "created_at": "2026-04-02T23:35:01Z",
+    "updated_at": "2026-04-02T23:35:01Z"
+  },
+  {
+    "course_ref": "34049",
+    "canvas_course_id": 34049,
+    "course_name": "Data Driven Business",
+    "course_code": "CIA@2017",
+    "term_name": "Periodo: 20254.GRAD-EAD.6",
+    "workflow_state": "available",
+    "created_at": "2026-04-02T23:35:05Z",
+    "updated_at": "2026-04-02T23:35:05Z"
+  },
+  {
+    "course_ref": "34052",
+    "canvas_course_id": 34052,
+    "course_name": "Empreendedorismo",
+    "course_code": "EMP@100",
+    "term_name": "Periodo: 20261.GRAD.6",
+    "workflow_state": "available",
+    "created_at": "2026-04-02T23:35:08Z",
+    "updated_at": "2026-04-02T23:35:08Z"
+  },
+  {
+    "course_ref": "34053",
+    "canvas_course_id": 34053,
+    "course_name": "Gerenciamento de Projetos",
+    "course_code": "GPR@100",
+    "term_name": "Periodo: 20261.GRAD.6",
+    "workflow_state": "available",
+    "created_at": "2026-04-02T23:35:12Z",
+    "updated_at": "2026-04-02T23:35:12Z"
   }
 ]

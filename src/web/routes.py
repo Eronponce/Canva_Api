@@ -175,6 +175,17 @@ def create_message_job():
     return jsonify({"job": job}), 202
 
 
+@web.post("/api/messages/recipients")
+def preview_message_recipients():
+    raw_payload = request.get_json(silent=True) or {}
+    payload, _course_refs = _with_resolved_courses(
+        raw_payload,
+        "Selecione ao menos um grupo ou curso para listar os destinatarios.",
+    )
+    result = services()["message_service"].preview_recipients(payload)
+    return jsonify(result)
+
+
 @web.get("/api/jobs/<job_id>")
 def get_job(job_id: str):
     job = services()["job_manager"].get_job(job_id)

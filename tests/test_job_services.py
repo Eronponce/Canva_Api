@@ -30,8 +30,8 @@ class FakeCanvasClient:
             },
         }
         self.students = {
-            "101": [{"id": 1}, {"id": 2}],
-            "202": [{"id": 2}, {"id": 3}],
+            "101": [{"id": 1, "name": "Aluno 1"}, {"id": 2, "name": "Aluno 2"}],
+            "202": [{"id": 2, "name": "Aluno 2"}, {"id": 3, "name": "Aluno 3"}],
         }
         self.announcements_created = []
         self.conversations_created = []
@@ -156,3 +156,44 @@ def test_message_job_deduplicates_students_in_dry_run(app, monkeypatch):
     assert summary["total_recipients_targeted"] == 3
     assert summary["total_duplicates_skipped"] == 1
     assert summary["dry_run"] is True
+
+
+def test_message_job_filters_manual_recipients_and_falls_back_from_context(app, monkeypatch):
+    services = app.extensions["services"]
+    fake_client = FakeCanvasClient()
+    monkeypatch.setattr(services["connection_service"], "build_client", lambda payload: fake_client)
+
+    job_manager = services["job_manager"]
+    service = services["message_service"]
+    job = job_manager.create_job(kind="message", title="Mensagem manual")
+
+    service.run_job(
+        job["id"],
+        {
+            "base_url": "https://canvas.example.com",
+            "access_token": "token",
+            "course_ids_text": "101\n202",
+            "subject": "Aviso",
+            "message": "Mensagem manual",
+            "strategy": "context",
+            "dedupe": True,
+            "dry_run": True,
+            "manual_recipients": True,
+            "selected_user_ids": [2],
+        },
+    )
+
+    finished = job_manager.get_job(job["id"])
+    summary = finished["result"]["summary"]
+    rows = finished["result"]["course_results"]
+
+    assert finished["status"] == "completed"
+    assert summary["manual_recipients"] is True
+    assert summary["selected_user_count"] == 1
+    assert summary["effective_strategy"] == "users"
+    assert summary["total_recipients_targeted"] == 1
+    assert rows[0]["manual_matches"] == 1
+    assert rows[0]["recipients_targeted"] == 1
+    assert rows[1]["manual_matches"] == 1
+    assert rows[1]["recipients_targeted"] == 0
+    assert rows[1]["status"] == "skipped"

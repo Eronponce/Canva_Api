@@ -2,6 +2,18 @@ from __future__ import annotations
 
 
 class FakeCourseLookupClient:
+    def __init__(self):
+        self.students = {
+            "101": [
+                {"id": 11, "name": "Aluno 11"},
+                {"id": 22, "name": "Aluno 22"},
+            ],
+            "202": [
+                {"id": 22, "name": "Aluno 22"},
+                {"id": 33, "name": "Aluno 33"},
+            ],
+        }
+
     def get_course(self, course_ref):
         return {
             "id": int(course_ref),
@@ -10,6 +22,9 @@ class FakeCourseLookupClient:
             "workflow_state": "available",
             "term": {"name": "2026/1"},
         }
+
+    def list_course_students(self, course_ref):
+        return self.students[str(course_ref)]
 
 
 def test_registered_course_crud_endpoints(app, monkeypatch):
@@ -217,3 +232,29 @@ def test_groups_include_registered_course_names(app, monkeypatch):
     assert response.status_code == 200
     item = response.get_json()["item"]
     assert item["courses"][0]["course_name"] == "Curso 801"
+
+
+def test_message_recipients_route_lists_unique_students(app, monkeypatch):
+    client = app.test_client()
+    services = app.extensions["services"]
+    monkeypatch.setattr(
+        services["connection_service"],
+        "build_client",
+        lambda payload: FakeCourseLookupClient(),
+    )
+
+    response = client.post(
+        "/api/messages/recipients",
+        json={
+            "base_url": "https://canvas.example.com",
+            "access_token": "token",
+            "course_refs": ["101", "202"],
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["unique_recipients"] == 3
+    assert payload["total_students_found"] == 4
+    shared = next(item for item in payload["items"] if item["user_id"] == 22)
+    assert shared["course_refs"] == ["101", "202"]

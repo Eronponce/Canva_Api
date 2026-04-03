@@ -179,6 +179,9 @@ function restoreUiState() {
     $("#messageDryRun").checked = Boolean(saved.messageDryRun);
     state.announcement = { ...state.announcement, ...(saved.announcement || {}) };
     state.message = { ...state.message, ...(saved.message || {}) };
+    if (!["groups", "courses"].includes(state.message.mode)) {
+      state.message.mode = "groups";
+    }
     if (saved.activeTab) {
       openTab(saved.activeTab);
     }
@@ -207,7 +210,12 @@ function persistUiState() {
       messageDedupe: $("#messageDedupe").checked,
       messageDryRun: $("#messageDryRun").checked,
       announcement: state.announcement,
-      message: state.message,
+      message: {
+        mode: state.message.mode,
+        groupIds: state.message.groupIds,
+        courseRefs: state.message.courseRefs,
+        selectAllGroups: state.message.selectAllGroups,
+      },
     }),
   );
 }
@@ -283,7 +291,7 @@ function ensureTargetSelection(kind) {
   if (payload.select_all_groups) return state.groups.length > 0;
   if (payload.group_ids?.length) return true;
   openTab(kind === "announcement" ? "announcements" : "messages");
-  showNotice("Selecione grupos salvos ou cursos especificos antes de enviar.", "error");
+  showNotice("Selecione grupos ou cursos antes de enviar.", "error");
   return false;
 }
 
@@ -407,7 +415,6 @@ function renderAll() {
   renderModeSwitch("message");
   renderTargetControls("announcement");
   renderTargetControls("message");
-  renderMessageInfoPanel();
   renderReports();
   renderSettingsInfo(state.config || {});
   renderConnectionResult(state.connectionSnapshot);
@@ -640,12 +647,16 @@ function renderModeSwitch(kind) {
 function renderTargetControls(kind) {
   const target = state[kind];
   const groupsMode = target.mode === "groups";
+  const courseMode = target.mode === "courses";
   $(`#${kind}AllGroupsLine`).classList.toggle("hidden", !groupsMode);
   $(`#${kind}GroupPicker`).classList.toggle("hidden", !groupsMode);
-  $(`#${kind}CoursePicker`).classList.toggle("hidden", groupsMode);
+  $(`#${kind}CoursePicker`).classList.toggle("hidden", !courseMode);
   $(`#${kind === "announcement" ? "announcementAllGroups" : "messageAllGroups"}`).checked = target.selectAllGroups;
   renderPickers();
   renderTargetSummary(kind);
+  if (kind === "message") {
+    renderMessageInfoPanel();
+  }
 }
 
 function renderPickers() {
@@ -694,7 +705,6 @@ function togglePickerValue(pickerId, value, checked) {
   target.set(nextValues);
   if (target.kind) {
     renderTargetControls(target.kind);
-    if (target.kind === "message") renderMessageInfoPanel();
     persistUiState();
     return;
   }
@@ -778,9 +788,13 @@ function renderTargetSummary(kind) {
   const courses = target.mode === "groups"
     ? selectedGroups(kind).flatMap((group) => group.courses || [])
     : selectedCourses(kind);
+  const modeLabelMap = {
+    groups: "Grupos salvos",
+    courses: "Cursos especificos",
+  };
   const uniqueCourseRefs = unique(courses.map((course) => course.course_ref));
   summaryEl.innerHTML = `
-    <div class="summary-card"><span>Modo</span><strong>${target.mode === "groups" ? "Grupos salvos" : "Cursos especificos"}</strong></div>
+    <div class="summary-card"><span>Modo</span><strong>${modeLabelMap[target.mode] || "-"}</strong></div>
     <div class="summary-card"><span>Grupos</span><strong>${target.mode === "groups" ? (target.selectAllGroups ? "Todos" : String(selectedGroups(kind).length)) : "-"}</strong></div>
     <div class="summary-card"><span>Cursos</span><strong>${escapeHtml(String(uniqueCourseRefs.length))}</strong></div>
     <div class="summary-card"><span>Selecao</span><strong>${escapeHtml(courses.slice(0, 2).map((course) => course.course_name || course.course_ref).join(" | ") || "Nenhuma")}${courses.length > 2 ? "..." : ""}</strong></div>
@@ -804,6 +818,12 @@ function renderMessageInfoPanel() {
     ? selectedGroups("message").flatMap((group) => group.courses || [])
     : selectedCourses("message");
   $("#messageInfoPanel").innerHTML = courses.length ? `
+    <div class="summary-grid">
+      <div class="summary-card"><span>Turmas resolvidas</span><strong>${escapeHtml(String(courses.length))}</strong></div>
+      <div class="summary-card"><span>Modo</span><strong>${state.message.mode === "courses" ? "Cursos especificos" : "Grupos salvos"}</strong></div>
+      <div class="summary-card"><span>Grupos</span><strong>${state.message.mode === "groups" ? (state.message.selectAllGroups ? "Todos" : String(selectedGroups("message").length)) : "-"}</strong></div>
+      <div class="summary-card"><span>Cursos</span><strong>${escapeHtml(String(unique(courses.map((course) => course.course_ref)).length))}</strong></div>
+    </div>
     <div class="chips">
       ${unique(courses.map((course) => `${course.course_name || course.course_ref} (${course.course_ref})`)).slice(0, 10).map((label) => `<span class="chip">${escapeHtml(label)}</span>`).join("")}
     </div>
@@ -954,6 +974,7 @@ function renderMessageJob(job) {
     { label: "Turma", format: (row) => `${escapeHtml(row.course_name || "-")}<div class="subtle mono">${escapeHtml(String(row.course_id || row.course_ref || "-"))}</div>` },
     { label: "Estrategia", format: (row) => escapeHtml(row.strategy_used || "-") },
     { label: "Alunos", format: (row) => escapeHtml(String(row.students_found || 0)) },
+    { label: "Alvo", format: (row) => escapeHtml(String(row.recipients_targeted || 0)) },
     { label: "Enviados", format: (row) => escapeHtml(String(row.recipients_sent || 0)) },
     { label: "Status", format: (row) => statusChip(row.status) },
     { label: "Erro", format: (row) => escapeHtml(row.error || "-") },
@@ -1040,6 +1061,7 @@ function reportColumns(kind) {
     return [
       { label: "Turma", format: (row) => `${escapeHtml(row.course_name || "-")}<div class="subtle mono">${escapeHtml(String(row.course_id || row.course_ref || "-"))}</div>` },
       { label: "Alunos", format: (row) => escapeHtml(String(row.students_found || 0)) },
+      { label: "Alvo", format: (row) => escapeHtml(String(row.recipients_targeted || 0)) },
       { label: "Enviados", format: (row) => escapeHtml(String(row.recipients_sent || 0)) },
       { label: "Status", format: (row) => statusChip(row.status) },
       { label: "Erro", format: (row) => escapeHtml(row.error || "-") },

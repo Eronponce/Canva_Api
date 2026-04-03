@@ -224,17 +224,18 @@ code,
 .panel-grid-connection,
 .panel-grid-organization,
 .panel-grid-settings,
-.panel-grid-reports {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
+.panel-grid-reports,
 .panel-grid-announcements,
 .panel-grid-messages {
-  grid-template-columns: 270px minmax(0, 1.1fr) 320px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .card {
   padding: 14px;
+}
+
+.span-two {
+  grid-column: 1 / -1;
 }
 
 .card-header {
@@ -746,12 +747,7 @@ pre {
 @media (max-width: 1480px) {
   .panel-grid-announcements,
   .panel-grid-messages {
-    grid-template-columns: 260px minmax(0, 1fr);
-  }
-
-  .panel-grid-announcements > :last-child,
-  .panel-grid-messages > :last-child {
-    grid-column: 1 / -1;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 

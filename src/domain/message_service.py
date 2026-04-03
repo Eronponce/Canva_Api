@@ -16,6 +16,64 @@ class MessageService:
         self.connection_service = connection_service
         self.job_manager = job_manager
 
+    def preview_recipients(self, payload: dict) -> dict:
+        course_refs = parse_course_references(payload.get("course_ids_text", ""))
+        if not course_refs:
+            raise ValueError("Selecione ao menos uma turma para listar os destinatarios.")
+
+        client = self.connection_service.build_client(payload)
+        recipients_by_id: dict[str, dict] = {}
+        courses = []
+        total_students_found = 0
+
+        for course_ref in course_refs:
+            course = client.get_course(course_ref)
+            students = self._course_students(client, course)
+            total_students_found += len(students)
+            courses.append(
+                {
+                    "course_ref": course_ref,
+                    "course_id": course.get("id"),
+                    "course_name": course.get("name"),
+                    "students_found": len(students),
+                }
+            )
+
+            for student in students:
+                user_id = student.get("id")
+                if user_id is None:
+                    continue
+
+                recipient = recipients_by_id.setdefault(
+                    str(user_id),
+                    {
+                        "user_id": user_id,
+                        "name": self._student_name(student),
+                        "short_name": student.get("short_name") or "",
+                        "sortable_name": student.get("sortable_name") or "",
+                        "login_id": student.get("login_id") or "",
+                        "sis_user_id": student.get("sis_user_id") or "",
+                        "course_refs": [],
+                        "course_names": [],
+                    },
+                )
+                if course_ref not in recipient["course_refs"]:
+                    recipient["course_refs"].append(course_ref)
+                course_name = course.get("name") or str(course_ref)
+                if course_name not in recipient["course_names"]:
+                    recipient["course_names"].append(course_name)
+
+        items = sorted(
+            recipients_by_id.values(),
+            key=lambda item: ((item.get("name") or "").lower(), item.get("user_id") or 0),
+        )
+        return {
+            "items": items,
+            "courses": courses,
+            "total_students_found": total_students_found,
+            "unique_recipients": len(items),
+        }
+
     def run_job(self, job_id: str, payload: dict) -> None:
         course_refs = parse_course_references(payload.get("course_ids_text", ""))
         subject = (payload.get("subject") or "").strip()
@@ -23,6 +81,8 @@ class MessageService:
         requested_strategy = payload.get("strategy") or "users"
         dedupe = bool(payload.get("dedupe"))
         dry_run = bool(payload.get("dry_run"))
+        manual_recipients = bool(payload.get("manual_recipients"))
+        selected_user_ids = self._selected_user_ids(payload)
 
         if not course_refs:
             raise ValueError("Informe pelo menos uma turma para enviar as mensagens.")
@@ -30,17 +90,23 @@ class MessageService:
             raise ValueError("Informe o assunto da mensagem.")
         if not message:
             raise ValueError("Informe o corpo da mensagem.")
+        if manual_recipients and not selected_user_ids:
+            raise ValueError("Selecione pelo menos um destinatario manual para a caixa de entrada.")
 
         client = self.connection_service.build_client(payload)
         user = client.get_current_user()
 
         effective_strategy = requested_strategy
-        if requested_strategy == "context" and dedupe:
+        if requested_strategy == "context" and (dedupe or manual_recipients):
             effective_strategy = "users"
             self.job_manager.add_log(
                 job_id,
                 level="warning",
-                message="Deduplicação exige envio por usuário. A estratégia foi ajustada automaticamente.",
+                message="A estrategia foi ajustada automaticamente para envio por usuario.",
+                data={
+                    "dedupe": dedupe,
+                    "manual_recipients": manual_recipients,
+                },
             )
 
         total_steps = max(len(course_refs) * 2, 1)
@@ -52,7 +118,7 @@ class MessageService:
         self.job_manager.add_log(
             job_id,
             level="info",
-            message="Conexão validada para o envio de mensagens.",
+            message="Conexao validada para o envio de mensagens.",
             data={"user_id": user.get("id"), "user_name": user.get("name")},
         )
 
@@ -68,11 +134,7 @@ class MessageService:
             )
 
             course = client.get_course(course_ref)
-            students = [
-                student
-                for student in client.list_course_students(str(course.get("id")))
-                if not student.get("is_test_student")
-            ]
+            students = self._course_students(client, course)
 
             context_match = None
             try:
@@ -84,7 +146,7 @@ class MessageService:
                 self.job_manager.add_log(
                     job_id,
                     level="warning",
-                    message="Não foi possível validar o contexto da turma via Search Recipients.",
+                    message="Nao foi possivel validar o contexto da turma via Search Recipients.",
                     data={"course_id": course.get("id"), "error": str(exc)},
                 )
 
@@ -132,8 +194,17 @@ class MessageService:
                 step=f"Enviando na turma {prepared_course['course_name']}",
             )
 
-            student_ids = [student["id"] for student in prepared_course["students"]]
+            student_ids = [
+                int(student["id"])
+                for student in prepared_course["students"]
+                if student.get("id") is not None
+            ]
             total_students_found += len(student_ids)
+            eligible_student_ids = [
+                student_id
+                for student_id in student_ids
+                if not manual_recipients or student_id in selected_user_ids
+            ]
 
             result_row = {
                 "course_ref": prepared_course["course_ref"],
@@ -142,6 +213,7 @@ class MessageService:
                 "strategy_requested": requested_strategy,
                 "strategy_used": effective_strategy,
                 "students_found": len(student_ids),
+                "manual_matches": len(eligible_student_ids),
                 "duplicates_skipped": 0,
                 "recipients_targeted": 0,
                 "recipients_sent": 0,
@@ -151,11 +223,12 @@ class MessageService:
                 "error": None,
                 "dry_run": dry_run,
                 "messageable_context": bool(prepared_course["context_match"]),
+                "manual_recipients": manual_recipients,
             }
 
             if effective_strategy == "users":
                 target_ids = []
-                for student_id in student_ids:
+                for student_id in eligible_student_ids:
                     if dedupe and student_id in seen_user_ids:
                         result_row["duplicates_skipped"] += 1
                         total_duplicates_skipped += 1
@@ -166,7 +239,7 @@ class MessageService:
 
                 result_row["strategy_used"] = "users"
             else:
-                target_ids = student_ids
+                target_ids = eligible_student_ids
                 if len(target_ids) > self.MAX_RECIPIENTS_PER_CALL:
                     result_row["strategy_used"] = "users_fallback"
 
@@ -179,14 +252,14 @@ class MessageService:
                 self.job_manager.add_log(
                     job_id,
                     level="info",
-                    message="Nenhum destinatário elegível para a turma.",
+                    message="Nenhum destinatario elegivel para a turma.",
                     data={"course_id": prepared_course["course_id"]},
                 )
                 self.job_manager.set_progress(
                     job_id,
                     current=step_index,
                     total=total_steps,
-                    step=f"Turma {prepared_course['course_name']} concluída",
+                    step=f"Turma {prepared_course['course_name']} concluida",
                 )
                 continue
 
@@ -194,18 +267,19 @@ class MessageService:
                 self.job_manager.add_log(
                     job_id,
                     level="info",
-                    message="Dry run da caixa de entrada concluído para a turma.",
+                    message="Dry run da caixa de entrada concluido para a turma.",
                     data={
                         "course_id": prepared_course["course_id"],
                         "strategy_used": result_row["strategy_used"],
                         "recipients_targeted": len(target_ids),
+                        "manual_matches": result_row["manual_matches"],
                     },
                 )
                 self.job_manager.set_progress(
                     job_id,
                     current=step_index,
                     total=total_steps,
-                    step=f"Turma {prepared_course['course_name']} concluída",
+                    step=f"Turma {prepared_course['course_name']} concluida",
                 )
                 course_results.append(result_row)
                 continue
@@ -262,7 +336,7 @@ class MessageService:
                         self.job_manager.add_log(
                             job_id,
                             level="error",
-                            message="Falha em lote de envio por usuário.",
+                            message="Falha em lote de envio por usuario.",
                             data={
                                 "course_id": prepared_course["course_id"],
                                 "batch_size": len(recipient_chunk),
@@ -274,7 +348,7 @@ class MessageService:
                         self.job_manager.add_log(
                             job_id,
                             level="error",
-                            message="Erro inesperado em lote de envio por usuário.",
+                            message="Erro inesperado em lote de envio por usuario.",
                             data={
                                 "course_id": prepared_course["course_id"],
                                 "batch_size": len(recipient_chunk),
@@ -293,7 +367,7 @@ class MessageService:
                 self.job_manager.add_log(
                     job_id,
                     level="info",
-                    message="Envio por usuário concluído para a turma.",
+                    message="Envio por usuario concluido para a turma.",
                     data={
                         "course_id": prepared_course["course_id"],
                         "recipients_sent": result_row["recipients_sent"],
@@ -307,7 +381,7 @@ class MessageService:
                 job_id,
                 current=step_index,
                 total=total_steps,
-                step=f"Turma {prepared_course['course_name']} concluída",
+                step=f"Turma {prepared_course['course_name']} concluida",
             )
 
         summary = {
@@ -320,6 +394,8 @@ class MessageService:
             "effective_strategy": effective_strategy,
             "dry_run": dry_run,
             "dedupe": dedupe,
+            "manual_recipients": manual_recipients,
+            "selected_user_count": len(selected_user_ids),
             "total_courses": len(course_results),
             "total_students_found": total_students_found,
             "total_recipients_targeted": total_recipients_targeted,
@@ -341,7 +417,8 @@ class MessageService:
             report_filename=report_filename,
         )
 
-    def _extract_conversation_ids(self, response) -> list[int]:
+    @staticmethod
+    def _extract_conversation_ids(response) -> list[int]:
         if isinstance(response, list):
             return [item.get("id") for item in response if item.get("id") is not None]
         if isinstance(response, dict) and response.get("id") is not None:
@@ -358,6 +435,7 @@ class MessageService:
             "strategy_requested",
             "strategy_used",
             "students_found",
+            "manual_matches",
             "duplicates_skipped",
             "recipients_targeted",
             "recipients_sent",
@@ -366,6 +444,7 @@ class MessageService:
             "conversation_ids",
             "dry_run",
             "messageable_context",
+            "manual_recipients",
             "error",
         ]
 
@@ -380,3 +459,34 @@ class MessageService:
                 writer.writerow(serializable)
 
         return report_filename
+
+    @staticmethod
+    def _selected_user_ids(payload: dict) -> set[int]:
+        values = payload.get("selected_user_ids") or []
+        if not isinstance(values, list):
+            return set()
+
+        selected: set[int] = set()
+        for value in values:
+            try:
+                selected.add(int(value))
+            except (TypeError, ValueError):
+                continue
+        return selected
+
+    @staticmethod
+    def _student_name(student: dict) -> str:
+        return (
+            student.get("name")
+            or student.get("short_name")
+            or student.get("sortable_name")
+            or f"Usuario {student.get('id')}"
+        )
+
+    @staticmethod
+    def _course_students(client, course: dict) -> list[dict]:
+        return [
+            student
+            for student in client.list_course_students(str(course.get("id")))
+            if not student.get("is_test_student")
+        ]
