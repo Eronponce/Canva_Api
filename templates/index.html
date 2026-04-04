@@ -663,74 +663,86 @@
             </div>
           </article>
 
-          <article class="card span-two">
+          <article class="card span-two" data-collapsible-card="engagementSummary">
             <div class="card-header">
               <div>
                 <h2>Resumo da selecao</h2>
                 <p>Resumo consolidado da busca antes da mensagem.</p>
               </div>
+              <button class="mini-btn ghost" type="button" data-card-toggle="engagementSummary" aria-expanded="true">Recolher</button>
             </div>
-            <div id="engagementTargetSummary" class="summary-grid"></div>
+            <div class="card-collapse-body" data-card-body="engagementSummary">
+              <div id="engagementTargetSummary" class="summary-grid"></div>
+            </div>
           </article>
 
-          <article class="card span-two">
+          <article class="card span-two" data-collapsible-card="engagementMessage">
             <div class="card-header">
               <div>
                 <h2>Mensagem</h2>
                 <p>Escreva a mensagem com variaveis seguras e valide a amostra antes do disparo.</p>
               </div>
+              <button class="mini-btn ghost" type="button" data-card-toggle="engagementMessage" aria-expanded="true">Recolher</button>
             </div>
-            <form id="engagementForm" class="stack-form">
-              <label class="field">
-                <span>Assunto</span>
-                <input id="engagementSubject" data-template-scope="engagement" type="text" placeholder="Acompanhamento de acesso ao curso">
-              </label>
-
-              <label class="field">
-                <span>Mensagem</span>
-                {% raw %}
-                <textarea id="engagementMessage" data-template-scope="engagement" rows="12" placeholder="Ola {{student_name}},&#10;&#10;Percebemos que no curso {{course_name}} voce esta com o seguinte status: {{reason}}."></textarea>
-                {% endraw %}
-              </label>
-
-              <div class="template-tools">
-                <div id="engagementTokenPalette" class="token-palette"></div>
-              </div>
-              <div id="engagementTemplateStatus" class="template-status"></div>
-              <div id="engagementMessagePreview" class="message-preview-panel empty-state">Busque os alunos para gerar uma amostra da mensagem para inativos.</div>
-
-              <div class="switch-stack">
-                <label class="switch-line">
-                  <input id="engagementDryRun" class="switch-input" type="checkbox">
-                  <span class="switch-track" aria-hidden="true"></span>
-                  <span class="switch-copy">Modo teste</span>
+            <div class="card-collapse-body" data-card-body="engagementMessage">
+              <form id="engagementForm" class="stack-form">
+                <label class="field">
+                  <span>Assunto</span>
+                  <input id="engagementSubject" data-template-scope="engagement" type="text" placeholder="Acompanhamento de acesso ao curso">
                 </label>
-              </div>
 
-              <div class="button-row">
-                <button class="btn btn-primary" type="submit">Enviar para os alunos encontrados</button>
-              </div>
-            </form>
+                <label class="field">
+                  <span>Mensagem</span>
+                  {% raw %}
+                  <textarea id="engagementMessage" data-template-scope="engagement" rows="12" placeholder="Ola {{student_name}},&#10;&#10;Percebemos que voce ainda nao se movimentou como esperado em {{course_name}}."></textarea>
+                  {% endraw %}
+                </label>
+
+                <div class="template-tools">
+                  <div id="engagementTokenPalette" class="token-palette"></div>
+                </div>
+                <div id="engagementTemplateStatus" class="template-status"></div>
+                <div id="engagementMessagePreview" class="message-preview-panel empty-state">Busque os alunos para gerar uma amostra da mensagem para inativos.</div>
+
+                <div class="switch-stack">
+                  <label class="switch-line">
+                    <input id="engagementDryRun" class="switch-input" type="checkbox">
+                    <span class="switch-track" aria-hidden="true"></span>
+                    <span class="switch-copy">Modo teste</span>
+                  </label>
+                </div>
+
+                <div class="button-row">
+                  <button class="btn btn-primary" type="submit">Enviar para os alunos encontrados</button>
+                </div>
+              </form>
+            </div>
           </article>
 
-          <article class="card span-two">
+          <article class="card span-two" data-collapsible-card="engagementPreview">
             <div class="card-header">
               <div>
                 <h2>Quem vai receber</h2>
                 <p>Veja turmas e alunos encontrados, ja ordenados por prioridade de acao.</p>
               </div>
+              <button class="mini-btn ghost" type="button" data-card-toggle="engagementPreview" aria-expanded="true">Recolher</button>
             </div>
-            <div id="engagementPreviewCard" class="job-output empty-state">Selecione as turmas e clique em buscar para ver quem entra no envio.</div>
+            <div class="card-collapse-body" data-card-body="engagementPreview">
+              <div id="engagementPreviewCard" class="job-output empty-state">Selecione as turmas e clique em buscar para ver quem entra no envio.</div>
+            </div>
           </article>
 
-          <article class="card span-two">
+          <article class="card span-two" data-collapsible-card="engagementResult">
             <div class="card-header">
               <div>
                 <h2>Resultado do envio</h2>
                 <p>Acompanhe o lote e baixe o CSV consolidado por turma.</p>
               </div>
+              <button class="mini-btn ghost" type="button" data-card-toggle="engagementResult" aria-expanded="true">Recolher</button>
             </div>
-            <div id="engagementJobCard" class="job-output empty-state">Nenhum lote de alunos inativos iniciado.</div>
+            <div class="card-collapse-body" data-card-body="engagementResult">
+              <div id="engagementJobCard" class="job-output empty-state">Nenhum lote de alunos inativos iniciado.</div>
+            </div>
           </article>
         </div>
       </section>

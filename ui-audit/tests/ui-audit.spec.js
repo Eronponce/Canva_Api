@@ -116,7 +116,7 @@ async function checkFirstPickerItem(page, pickerId) {
 async function fillAnnouncementForm(page) {
   await checkFirstPickerItem(page, "announcementGroupPicker");
   await page.fill("#announcementTitle", "Aviso semanal | {{course_name}}");
-  await page.fill("#announcementMessage", "<p>Ola turma {{course_code}}, nosso encontro sera hoje.</p>");
+  await page.fill("#announcementMessage", "<p>Ola turma {{course_name}}, nosso encontro sera hoje.</p>");
 }
 
 async function fillMessageForm(page, options = {}) {
@@ -145,7 +145,7 @@ async function fillEngagementScreen(page) {
   await page.fill("#engagementSubject", "Acompanhamento | {{student_name}}");
   await page.fill(
     "#engagementMessage",
-    "Ola {{student_name}}, vimos que em {{course_name}} voce esta com o status {{reason}}.",
+    "Ola {{student_name}}, vimos que em {{course_name}} queremos retomar seu acompanhamento.",
   );
 }
 

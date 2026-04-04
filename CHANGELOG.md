@@ -1,5 +1,26 @@
 # Changelog
 
+## v1.1.0 - 2026-04-03
+
+Release focada em visual improvements, clareza operacional e polish de UX.
+
+### Destaques
+
+- refinamento visual de cards, tabelas, modais e estados vazios
+- `selects` ajustados para alto contraste no Windows
+- mensagens de erro com scroll, foco automatico e destaque visual
+- modulo `Inativos` reorganizado em fluxo vertical com secoes recolhiveis
+- explicacoes contextuais por coluna nas tabelas via ajuda embutida
+- simplificacao dos placeholders para reduzir erro operacional
+- limpeza da exibicao de numero e codigo de curso nas telas operacionais
+- checklist completo de QA manual em `docs/manual_test_checklist.md`
+
+### Qualidade
+
+- `pytest`
+- `node --check`
+- `python -m compileall`
+
 ## v1.0.0 - 2026-04-03
 
 Primeira release consolidada do painel operacional para Canvas LMS.

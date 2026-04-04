@@ -36,6 +36,7 @@ const state = {
   templateFocusFieldId: null,
   pickerSearch: {},
   pickerReorder: {},
+  collapsedCards: {},
   announcement: {
     mode: "groups",
     groupIds: [],
@@ -90,6 +91,7 @@ document.addEventListener("DOMContentLoaded", () => {
   updateRecurrenceSamplePreview();
   updateRecurrenceEditSamplePreview();
   updateEngagementMessagePreview();
+  window.addEventListener("resize", syncCollapsibleCards);
   loadInitialData();
 });
 
@@ -476,6 +478,12 @@ function handleDelegatedClick(event) {
   const recurrenceAction = event.target.closest("[data-recurrence-action]");
   if (recurrenceAction) {
     handleRecurrenceAction(recurrenceAction.dataset.recurrenceAction, recurrenceAction.dataset.recurrenceId);
+    return;
+  }
+
+  const cardToggle = event.target.closest("[data-card-toggle]");
+  if (cardToggle) {
+    toggleCardCollapse(cardToggle.dataset.cardToggle);
   }
 }
 
@@ -624,6 +632,7 @@ function restoreUiState() {
     state.recurrence.listSearch = saved.recurrenceListSearch || saved.recurrence?.listSearch || "";
     state.recurrence.listStatus = saved.recurrenceListStatus || saved.recurrence?.listStatus || "all";
     state.engagement = { ...state.engagement, ...(saved.engagement || {}), preview: null };
+    state.collapsedCards = { ...(saved.collapsedCards || {}) };
     if (!["groups", "courses"].includes(state.message.mode)) {
       state.message.mode = "groups";
     }
@@ -705,6 +714,7 @@ function persistUiState() {
         courseRefs: state.engagement.courseRefs,
         selectAllGroups: state.engagement.selectAllGroups,
       },
+      collapsedCards: state.collapsedCards,
     }),
   );
 }
@@ -719,6 +729,7 @@ function openTab(tabName) {
   if (tabName !== "settings") {
     hideEnvFile();
   }
+  window.setTimeout(syncCollapsibleCards, 0);
   persistUiState();
   if (tabName === "organization") {
     maybeAutoLoadCourseCatalog();
@@ -747,6 +758,10 @@ function markInvalid(selector) {
 function focusField(selector) {
   const element = typeof selector === "string" ? $(selector) : selector;
   if (!element) return;
+  const tabPanel = element.closest(".tab-panel");
+  if (tabPanel && !tabPanel.classList.contains("active")) {
+    openTab(tabPanel.id.replace(/^tab-/, ""));
+  }
   element.focus();
   element.scrollIntoView({ behavior: "smooth", block: "center" });
 }
@@ -835,44 +850,54 @@ async function apiFetch(url, options = {}) {
   return data;
 }
 
+function presentNotice(element, message, type = "info") {
+  if (!element) return;
+  element.textContent = message;
+  element.className = `notice notice-${type}`;
+  element.classList.remove("hidden", "is-flash");
+  void element.offsetWidth;
+  element.classList.add("is-flash");
+  if (type === "error") {
+    element.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+}
+
+function hideNoticeElement(element) {
+  if (!element) return;
+  element.className = "notice hidden";
+  element.textContent = "";
+}
+
 function showNotice(message, type = "info") {
-  const notice = $("#globalNotice");
-  notice.textContent = message;
-  notice.className = `notice notice-${type}`;
+  presentNotice($("#globalNotice"), message, type);
 }
 
 function hideNotice() {
-  $("#globalNotice").className = "notice hidden";
+  hideNoticeElement($("#globalNotice"));
 }
 
 function showModalNotice(message, type = "info") {
-  const notice = $("#groupModalNotice");
-  notice.textContent = message;
-  notice.className = `notice notice-${type}`;
+  presentNotice($("#groupModalNotice"), message, type);
 }
 
 function hideModalNotice() {
-  $("#groupModalNotice").className = "notice hidden";
+  hideNoticeElement($("#groupModalNotice"));
 }
 
 function showSendReviewNotice(message, type = "info") {
-  const notice = $("#sendReviewNotice");
-  notice.textContent = message;
-  notice.className = `notice notice-${type}`;
+  presentNotice($("#sendReviewNotice"), message, type);
 }
 
 function hideSendReviewNotice() {
-  $("#sendReviewNotice").className = "notice hidden";
+  hideNoticeElement($("#sendReviewNotice"));
 }
 
 function showRecurrenceCancelNotice(message, type = "info") {
-  const notice = $("#recurrenceCancelNotice");
-  notice.textContent = message;
-  notice.className = `notice notice-${type}`;
+  presentNotice($("#recurrenceCancelNotice"), message, type);
 }
 
 function hideRecurrenceCancelNotice() {
-  $("#recurrenceCancelNotice").className = "notice hidden";
+  hideNoticeElement($("#recurrenceCancelNotice"));
 }
 
 function setBusy(button, isBusy, busyText = "Processando...") {
@@ -988,6 +1013,27 @@ function renderAll() {
   updateAttachmentMeta({ target: $("#messageAttachment") });
   renderEnvEditorState();
   renderConnectionResult(state.connectionSnapshot);
+  syncCollapsibleCards();
+  persistUiState();
+}
+
+function syncCollapsibleCards() {
+  document.querySelectorAll("[data-collapsible-card]").forEach((card) => {
+    const cardId = card.dataset.collapsibleCard;
+    const body = card.querySelector(`[data-card-body="${cardId}"]`);
+    const button = card.querySelector(`[data-card-toggle="${cardId}"]`);
+    if (!body || !button) return;
+    const collapsed = Boolean(state.collapsedCards[cardId]);
+    card.classList.toggle("is-collapsed", collapsed);
+    button.setAttribute("aria-expanded", collapsed ? "false" : "true");
+    button.textContent = collapsed ? "Expandir" : "Recolher";
+    body.style.maxHeight = collapsed ? "0px" : `${body.scrollHeight}px`;
+  });
+}
+
+function toggleCardCollapse(cardId) {
+  state.collapsedCards[cardId] = !state.collapsedCards[cardId];
+  syncCollapsibleCards();
   persistUiState();
 }
 
@@ -1254,7 +1300,7 @@ function renderGroups() {
       </div>
       ${group.description ? `<div class="compact-meta">${escapeHtml(group.description)}</div>` : ""}
       <div class="chips">
-        ${(group.courses || []).map((course) => `<span class="chip">${escapeHtml(course.course_name || course.course_ref)} (${escapeHtml(course.course_ref)})</span>`).join("")}
+        ${(group.courses || []).map((course) => `<span class="chip">${escapeHtml(course.course_name || course.course_ref)}</span>`).join("")}
       </div>
     </div>
   `).join("");
@@ -1598,18 +1644,11 @@ function closeRecurrenceEditModal() {
 }
 
 function showRecurrenceEditNotice(message, type = "info") {
-  const notice = $("#recurrenceEditNotice");
-  if (!notice) return;
-  notice.textContent = message;
-  notice.className = `notice ${type}`;
-  notice.classList.remove("hidden");
+  presentNotice($("#recurrenceEditNotice"), message, type);
 }
 
 function hideRecurrenceEditNotice() {
-  const notice = $("#recurrenceEditNotice");
-  if (!notice) return;
-  notice.className = "notice hidden";
-  notice.textContent = "";
+  hideNoticeElement($("#recurrenceEditNotice"));
 }
 
 function openRecurrenceReviewModal(mode, payload, preview) {
@@ -1639,18 +1678,11 @@ function closeRecurrenceReviewModal() {
 }
 
 function showRecurrenceReviewNotice(message, type = "info") {
-  const notice = $("#recurrenceReviewNotice");
-  if (!notice) return;
-  notice.textContent = message;
-  notice.className = `notice ${type}`;
-  notice.classList.remove("hidden");
+  presentNotice($("#recurrenceReviewNotice"), message, type);
 }
 
 function hideRecurrenceReviewNotice() {
-  const notice = $("#recurrenceReviewNotice");
-  if (!notice) return;
-  notice.className = "notice hidden";
-  notice.textContent = "";
+  hideNoticeElement($("#recurrenceReviewNotice"));
 }
 
 function renderRecurrenceReviewSummary(preview, editing) {
@@ -1684,7 +1716,7 @@ function renderRecurrenceReviewTargets(payload) {
       <div class="summary-card"><span>Turmas</span><strong>${escapeHtml(String(courses.length || 0))}</strong></div>
     </div>
     ${groups.length ? `<div class="chips">${groups.map((group) => `<span class="chip">${escapeHtml(group.name)}</span>`).join("")}</div>` : ""}
-    ${courses.length ? `<div class="chips">${courses.map((course) => `<span class="chip">${escapeHtml(course.course_name || course.course_ref)} (${escapeHtml(course.course_ref)})</span>`).join("")}</div>` : `<div class="empty-state">Nenhuma turma carregada.</div>`}
+    ${courses.length ? `<div class="chips">${courses.map((course) => `<span class="chip">${escapeHtml(course.course_name || course.course_ref)}</span>`).join("")}</div>` : `<div class="empty-state">Nenhuma turma carregada.</div>`}
   `;
 }
 
@@ -1924,7 +1956,6 @@ function renderReviewTargets(kind, data) {
         <div class="history-item-header">
           <div>
             <strong>${escapeHtml(course.course_name || course.course_ref || "-")}</strong>
-            <div class="compact-meta mono">${escapeHtml(String(course.course_id || course.course_ref || "-"))}${course.course_code ? ` | ${escapeHtml(course.course_code)}` : ""}</div>
           </div>
           <div class="history-actions">${statusChip(course.status === "ok" ? "success" : "error")}</div>
         </div>
@@ -1941,7 +1972,6 @@ function renderReviewTargets(kind, data) {
         <div class="history-item-header">
           <div>
             <strong>${escapeHtml(course.course_name || course.course_ref || "-")}</strong>
-            <div class="compact-meta mono">${escapeHtml(String(course.course_id || course.course_ref || "-"))}</div>
           </div>
           <div class="history-actions"><span class="chip">${escapeHtml(String(course.students_found || 0))} aluno(s)</span></div>
         </div>
@@ -1956,7 +1986,6 @@ function renderReviewTargets(kind, data) {
       <div class="history-item-header">
         <div>
           <strong>${escapeHtml(course.course_name || course.course_ref || "-")}</strong>
-          <div class="compact-meta mono">${escapeHtml(String(course.course_id || course.course_ref || "-"))}</div>
         </div>
         <div class="history-actions"><span class="chip">${escapeHtml(String(course.matched_students || 0))} alvo(s)</span></div>
       </div>
@@ -2094,14 +2123,11 @@ function renderReviewMessage(kind, data) {
     const sampleCourse = sampleRecipient
       ? findCourseByRef(sampleRecipient.course_ref || sampleRecipient.course_id)
       : firstTargetCourse("engagement");
-    const sampleReason = sampleRecipient?.reasons_label || "Motivo identificado no filtro";
     const previewSubject = renderCourseTemplate(request.subject || "-", sampleCourse, {
       student_name: sampleRecipient?.student_name || "Nome do aluno",
-      reason: sampleReason,
     });
     const previewBody = renderCourseTemplate(request.message || "", sampleCourse, {
       student_name: sampleRecipient?.student_name || "Nome do aluno",
-      reason: sampleReason,
     });
     return `
       <div class="message-block">
@@ -2566,8 +2592,8 @@ function coursePickerItems() {
   return state.registeredCourses.map((course) => ({
     id: course.course_ref,
     label: course.course_name || `Curso ${course.course_ref}`,
-    shortLabel: course.course_ref,
-    meta: `${course.course_ref}${course.course_code ? ` | ${course.course_code}` : ""}${course.term_name ? ` | ${course.term_name}` : ""}`,
+    shortLabel: course.course_name || `Curso ${course.course_ref}`,
+    meta: `${course.term_name ? `${course.term_name}` : "Curso cadastrado"}`,
     search: `${course.course_ref} ${course.course_name || ""} ${course.course_code || ""} ${course.term_name || ""}`.toLowerCase(),
   }));
 }
@@ -2576,8 +2602,8 @@ function catalogCoursePickerItems() {
   return state.courseCatalog.map((course) => ({
     id: String(course.course_ref || course.id),
     label: course.name || `Curso ${course.course_ref || course.id}`,
-    shortLabel: String(course.course_ref || course.id),
-    meta: `${course.course_ref || course.id}${course.course_code ? ` | ${course.course_code}` : ""}${course.term_name ? ` | ${course.term_name}` : ""}`,
+    shortLabel: course.name || `Curso ${course.course_ref || course.id}`,
+    meta: `${course.term_name ? `${course.term_name}` : "Curso do Canvas"}`,
     search: `${course.course_ref || course.id} ${course.name || ""} ${course.course_code || ""} ${course.term_name || ""}`.toLowerCase(),
     disabled: Boolean(course.already_registered),
     badge: course.already_registered ? "ja cadastrado" : "",
@@ -2658,7 +2684,7 @@ function renderMessageInfoPanel() {
       <span class="chip">${escapeHtml(request.dedupe ? "Sem duplicidade entre turmas" : "Duplicidade permitida")}</span>
       <span class="chip">${escapeHtml($("#messageAttachment").files?.[0]?.name || "Sem anexo")}</span>
       ${messageUsesStudentName(request) ? `<span class="chip">Personalizacao por aluno ativa</span>` : ""}
-      ${unique(courses.map((course) => `${course.course_name || course.course_ref} (${course.course_ref})`)).slice(0, 10).map((label) => `<span class="chip">${escapeHtml(label)}</span>`).join("")}
+      ${unique(courses.map((course) => `${course.course_name || course.course_ref}`)).slice(0, 10).map((label) => `<span class="chip">${escapeHtml(label)}</span>`).join("")}
     </div>
   ` : "Defina o destino para ver aqui o resumo operacional do envio.";
 }
@@ -2680,7 +2706,7 @@ function renderAnnouncementInfoPanel() {
     <div class="chips">
       <span class="chip">${escapeHtml($("#announcementAttachment").files?.[0]?.name || "Sem anexo")}</span>
       ${request.publish_mode === "schedule" && request.schedule_at_local ? `<span class="chip">Agenda para ${escapeHtml(formatLocalDateTimeLabel(request.schedule_at_local))}</span>` : ""}
-      ${unique(courses.map((course) => `${course.course_name || course.course_ref} (${course.course_ref})`)).slice(0, 8).map((label) => `<span class="chip">${escapeHtml(label)}</span>`).join("")}
+      ${unique(courses.map((course) => `${course.course_name || course.course_ref}`)).slice(0, 8).map((label) => `<span class="chip">${escapeHtml(label)}</span>`).join("")}
     </div>
   ` : "Defina o destino para ver o resumo operacional do comunicado.";
 }
@@ -2755,6 +2781,7 @@ function renderEngagementPreview(data) {
   if (!data) {
     target.innerHTML = "Selecione as turmas e clique em buscar para ver quem entra no envio.";
     target.classList.add("empty-state");
+    syncCollapsibleCards();
     return;
   }
 
@@ -2782,18 +2809,29 @@ function renderEngagementPreview(data) {
       <div class="summary-card"><span>Recursos pendentes</span><strong>${escapeHtml(String(summary.total_incomplete_resources_matches || 0))}</strong></div>
       <div class="summary-card"><span>Sem atividade</span><strong>${escapeHtml(String(summary.total_inactive_days_matches || 0))}</strong></div>
       <div class="summary-card"><span>Baixa atividade</span><strong>${escapeHtml(String(summary.total_low_activity_matches || 0))}</strong></div>
-      <div class="summary-card"><span>Turma foco</span><strong>${escapeHtml(summary.top_priority_course_name || summary.top_priority_course_ref || "-")}</strong></div>
+      <div class="summary-card"><span>Turma foco</span><strong>${escapeHtml(summary.top_priority_course_name || "-")}</strong></div>
       <div class="summary-card"><span>Criterio</span><strong>${escapeHtml(formatEngagementCriteria(summary.criteria_mode || $("#engagementCriteriaMode").value))}</strong></div>
     </div>
     ${notices.length ? `<div class="chips">${notices.map((item) => `<span class="chip dim">${escapeHtml(item)}</span>`).join("")}</div>` : ""}
+    <details class="table-guide" open>
+      <summary>Como ler estes dados</summary>
+      <div class="table-guide-grid">
+        <div class="table-guide-item"><strong>Sem acesso</strong><span>Canvas marcou page_views = 0 e participations = 0 para o aluno.</span></div>
+        <div class="table-guide-item"><strong>Pendentes</strong><span>O aluno ainda nao concluiu requisitos de modulos configurados no curso.</span></div>
+        <div class="table-guide-item"><strong>Sem atividade</strong><span>O last_activity_at ficou alem do limite configurado na busca.</span></div>
+        <div class="table-guide-item"><strong>Baixa atividade</strong><span>O total_activity_time ficou abaixo do teto em minutos informado.</span></div>
+        <div class="table-guide-item"><strong>Recebimento</strong><span>A mensagem vai pela Inbox do Canvas; email depende das notificacoes do aluno.</span></div>
+      </div>
+    </details>
     ${courses.length ? renderTable(engagementCourseColumns(), courses) : `<div class="empty-state">Nenhum curso entrou no preview.</div>`}
     ${items.length ? renderTable(engagementPreviewColumns(), items) : `<div class="empty-state">Nenhum aluno corresponde ao criterio selecionado.</div>`}
   `;
+  syncCollapsibleCards();
 }
 
 function engagementCourseColumns() {
   return [
-    { label: "Turma", format: (row) => `${escapeHtml(row.course_name || "-")}<div class="subtle mono">${escapeHtml(String(row.course_id || row.course_ref || "-"))}</div>` },
+    { label: "Turma", format: (row) => escapeHtml(row.course_name || "-") },
     { label: "Prioridade", format: (row) => priorityPill(row.priority_level, row.urgency_score) },
     { label: "Alunos", format: (row) => escapeHtml(String(row.students_found || 0)) },
     { label: "Alvo", format: (row) => escapeHtml(String(row.matched_students || 0)) },
@@ -2809,7 +2847,7 @@ function engagementCourseColumns() {
 
 function engagementPreviewColumns() {
   return [
-    { label: "Turma", format: (row) => `${escapeHtml(row.course_name || "-")}<div class="subtle mono">${escapeHtml(String(row.course_ref || row.course_id || "-"))}</div>` },
+    { label: "Turma", format: (row) => escapeHtml(row.course_name || "-") },
     { label: "Aluno", format: (row) => `${escapeHtml(row.student_name || "-")}<div class="subtle mono">${escapeHtml(String(row.user_id || "-"))}</div>` },
     { label: "Prioridade", format: (row) => priorityPill(row.priority_level, row.urgency_score) },
     { label: "Acessos", format: (row) => `${escapeHtml(String(row.page_views || 0))} visualizacoes<div class="subtle">${escapeHtml(String(row.participations || 0))} participacoes</div>` },
@@ -2827,8 +2865,6 @@ const TEMPLATE_SCOPE_CONFIG = {
     ],
     tokens: [
       { token: "{{course_name}}", label: "Nome da disciplina" },
-      { token: "{{course_ref}}", label: "Numero do curso" },
-      { token: "{{course_code}}", label: "Codigo da disciplina" },
     ],
   },
   recurrence: {
@@ -2838,8 +2874,6 @@ const TEMPLATE_SCOPE_CONFIG = {
     ],
     tokens: [
       { token: "{{course_name}}", label: "Nome da disciplina" },
-      { token: "{{course_ref}}", label: "Numero do curso" },
-      { token: "{{course_code}}", label: "Codigo da disciplina" },
     ],
   },
   recurrenceEdit: {
@@ -2849,8 +2883,6 @@ const TEMPLATE_SCOPE_CONFIG = {
     ],
     tokens: [
       { token: "{{course_name}}", label: "Nome da disciplina" },
-      { token: "{{course_ref}}", label: "Numero do curso" },
-      { token: "{{course_code}}", label: "Codigo da disciplina" },
     ],
   },
   message: {
@@ -2861,8 +2893,6 @@ const TEMPLATE_SCOPE_CONFIG = {
     tokens: [
       { token: "{{student_name}}", label: "Nome do aluno" },
       { token: "{{course_name}}", label: "Nome da disciplina" },
-      { token: "{{course_ref}}", label: "Numero do curso" },
-      { token: "{{course_code}}", label: "Codigo da disciplina" },
     ],
   },
   engagement: {
@@ -2873,9 +2903,6 @@ const TEMPLATE_SCOPE_CONFIG = {
     tokens: [
       { token: "{{student_name}}", label: "Nome do aluno" },
       { token: "{{course_name}}", label: "Nome da disciplina" },
-      { token: "{{course_ref}}", label: "Numero do curso" },
-      { token: "{{course_code}}", label: "Codigo da disciplina" },
-      { token: "{{reason}}", label: "Motivo da abordagem" },
     ],
   },
 };
@@ -3453,16 +3480,15 @@ function updateEngagementMessagePreview() {
   if (!sampleCourse) {
     preview.classList.add("empty-state");
     preview.innerHTML = "Selecione as turmas, carregue o alvo e gere a amostra da mensagem para inativos.";
+    syncCollapsibleCards();
     return;
   }
   preview.classList.remove("empty-state");
-  const sampleReason = sampleRecipient?.reasons_label || "Motivo identificado no filtro";
   const renderedSubject = renderCourseTemplate(
     $("#engagementSubject").value.trim() || "Acompanhamento de acesso ao curso",
     sampleCourse,
     {
       student_name: sampleRecipient?.student_name || "Nome do aluno",
-      reason: sampleReason,
     },
   );
   const renderedBody = escapeHtml(
@@ -3471,17 +3497,17 @@ function updateEngagementMessagePreview() {
       sampleCourse,
       {
         student_name: sampleRecipient?.student_name || "Nome do aluno",
-        reason: sampleReason,
       },
     ),
   ).replaceAll("\n", "<br>");
   preview.innerHTML = `
     <div class="message-preview-block">
       <strong>${escapeHtml(renderedSubject)}</strong>
-      <div class="compact-meta">Amostra com ${escapeHtml(sampleRecipient?.student_name || "Nome do aluno")} | ${escapeHtml(sampleCourse.course_name || sampleCourse.course_ref || "-")} | ${escapeHtml(sampleReason)}</div>
+      <div class="compact-meta">Amostra com ${escapeHtml(sampleRecipient?.student_name || "Nome do aluno")} | ${escapeHtml(sampleCourse.course_name || sampleCourse.course_ref || "-")}</div>
     </div>
     <div class="message-preview-block message-preview-html">${renderedBody}</div>
   `;
+  syncCollapsibleCards();
 }
 
 function updateAttachmentMeta(event) {
@@ -3542,9 +3568,6 @@ function findCourseByRef(ref) {
 function renderCourseTemplate(template, course, extraContext = {}) {
   const context = {
     course_name: course?.course_name || "Nome da disciplina",
-    course_ref: course?.course_ref || "0000",
-    course_code: course?.course_code || "CURSO000",
-    reason: "Motivo identificado",
     ...extraContext,
   };
   let rendered = String(template || "");
@@ -3826,18 +3849,19 @@ function stopPolling(kind) {
 
 function renderAnnouncementJob(job) {
   $("#announcementJobCard").innerHTML = renderJobLayout(job, [
-    { label: "Turma", format: (row) => `${escapeHtml(row.course_name || "-")}<div class="subtle mono">${escapeHtml(String(row.course_id || row.course_ref || "-"))}</div>` },
+    { label: "Turma", format: (row) => escapeHtml(row.course_name || "-") },
     { label: "Status", format: (row) => statusChip(row.status) },
     { label: "ID", format: (row) => escapeHtml(String(row.announcement_id || "-")) },
     { label: "Publicado", format: (row) => row.published ? "Sim" : "Nao" },
     { label: "Anexo", format: (row) => escapeHtml(row.attachment_name || "-") },
     { label: "Erro", format: (row) => escapeHtml(row.error || "-") },
   ]);
+  syncCollapsibleCards();
 }
 
 function renderMessageJob(job) {
   $("#messageJobCard").innerHTML = renderJobLayout(job, [
-    { label: "Turma", format: (row) => `${escapeHtml(row.course_name || "-")}<div class="subtle mono">${escapeHtml(String(row.course_id || row.course_ref || "-"))}</div>` },
+    { label: "Turma", format: (row) => escapeHtml(row.course_name || "-") },
     { label: "Estrategia", format: (row) => escapeHtml(row.strategy_used || "-") },
     { label: "Alunos", format: (row) => escapeHtml(String(row.students_found || 0)) },
     { label: "Alvo", format: (row) => escapeHtml(String(row.recipients_targeted || 0)) },
@@ -3846,11 +3870,12 @@ function renderMessageJob(job) {
     { label: "Status", format: (row) => statusChip(row.status) },
     { label: "Erro", format: (row) => escapeHtml(row.error || "-") },
   ]);
+  syncCollapsibleCards();
 }
 
 function renderEngagementJob(job) {
   $("#engagementJobCard").innerHTML = renderJobLayout(job, [
-    { label: "Turma", format: (row) => `${escapeHtml(row.course_name || "-")}<div class="subtle mono">${escapeHtml(String(row.course_id || row.course_ref || "-"))}</div>` },
+    { label: "Turma", format: (row) => escapeHtml(row.course_name || "-") },
     { label: "Alunos", format: (row) => escapeHtml(String(row.students_found || 0)) },
     { label: "Alvo", format: (row) => escapeHtml(String(row.recipients_targeted || 0)) },
     { label: "Sem acesso", format: (row) => escapeHtml(String(row.never_accessed_matches || 0)) },
@@ -3860,6 +3885,7 @@ function renderEngagementJob(job) {
     { label: "Status", format: (row) => statusChip(row.status) },
     { label: "Erro", format: (row) => escapeHtml(row.error || "-") },
   ]);
+  syncCollapsibleCards();
 }
 
 function renderJobLayout(job, columns) {
@@ -4004,7 +4030,7 @@ function renderReportDetail() {
 function reportColumns(kind) {
   if (kind === "engagement") {
     return [
-      { label: "Turma", format: (row) => `${escapeHtml(row.course_name || "-")}<div class="subtle mono">${escapeHtml(String(row.course_id || row.course_ref || "-"))}</div>` },
+      { label: "Turma", format: (row) => escapeHtml(row.course_name || "-") },
       { label: "Alunos", format: (row) => escapeHtml(String(row.students_found || 0)) },
       { label: "Alvo", format: (row) => escapeHtml(String(row.recipients_targeted || 0)) },
       { label: "Sem acesso", format: (row) => escapeHtml(String(row.never_accessed_matches || 0)) },
@@ -4017,7 +4043,7 @@ function reportColumns(kind) {
   }
   if (kind === "message") {
     return [
-      { label: "Turma", format: (row) => `${escapeHtml(row.course_name || "-")}<div class="subtle mono">${escapeHtml(String(row.course_id || row.course_ref || "-"))}</div>` },
+      { label: "Turma", format: (row) => escapeHtml(row.course_name || "-") },
       { label: "Alunos", format: (row) => escapeHtml(String(row.students_found || 0)) },
       { label: "Alvo", format: (row) => escapeHtml(String(row.recipients_targeted || 0)) },
       { label: "Enviados", format: (row) => escapeHtml(String(row.recipients_sent || 0)) },
@@ -4027,7 +4053,7 @@ function reportColumns(kind) {
     ];
   }
   return [
-    { label: "Turma", format: (row) => `${escapeHtml(row.course_name || "-")}<div class="subtle mono">${escapeHtml(String(row.course_id || row.course_ref || "-"))}</div>` },
+    { label: "Turma", format: (row) => escapeHtml(row.course_name || "-") },
     { label: "ID", format: (row) => escapeHtml(String(row.announcement_id || "-")) },
     { label: "Publicado", format: (row) => row.published ? "Sim" : "Nao" },
     { label: "Anexo", format: (row) => escapeHtml(row.attachment_name || "-") },
@@ -4068,7 +4094,7 @@ function reportAnalyticsColumns(sectionKey) {
   }
   if (sectionKey === "top_courses") {
     return [
-      { label: "Curso", format: (row) => `${escapeHtml(row.course_name || "-")}<div class="subtle mono">${escapeHtml(String(row.course_ref || "-"))}</div>` },
+      { label: "Curso", format: (row) => escapeHtml(row.course_name || "-") },
       { label: "Execucoes", format: (row) => `${escapeHtml(String(row.current_runs || 0))}<div class="subtle">ant.: ${escapeHtml(String(row.previous_runs || 0))}</div>` },
       { label: "Delta exec.", format: (row) => deltaPill(row.delta_runs) },
       { label: "Sucesso", format: (row) => `${escapeHtml(String(row.current_success || 0))}<div class="subtle">ant.: ${escapeHtml(String(row.previous_success || 0))}</div>` },
@@ -4104,7 +4130,7 @@ function reportAnalyticsColumns(sectionKey) {
     return [
       { label: "Data", format: (row) => escapeHtml(formatDate(row.created_at)) },
       { label: "Tipo", format: (row) => escapeHtml(row.kind || "-") },
-      { label: "Curso", format: (row) => `${escapeHtml(row.course_name || "-")}<div class="subtle mono">${escapeHtml(String(row.course_ref || "-"))}</div>` },
+      { label: "Curso", format: (row) => escapeHtml(row.course_name || "-") },
       { label: "Status", format: (row) => statusChip(row.status || "error") },
       { label: "Erro", format: (row) => escapeHtml(row.error || "-") },
     ];
@@ -4114,11 +4140,80 @@ function reportAnalyticsColumns(sectionKey) {
   ];
 }
 
+const TABLE_COLUMN_HELP = {
+  Turma: "Nome da disciplina ou curso no Canvas que entrou no lote ou na analise.",
+  Curso: "Curso do Canvas relacionado ao registro exibido.",
+  Recorrencia: "Nome interno da base recorrente salva no painel.",
+  Grupo: "Grupo local de turmas salvo no painel.",
+  Prioridade: "Pontuacao interna do painel para destacar onde agir primeiro.",
+  Alunos: "Quantidade total de alunos encontrados no curso para aquele contexto.",
+  Alvo: "Quantidade de alunos ou registros que realmente entram no criterio atual.",
+  Cobertura: "Percentual do curso que entrou no alvo, calculado sobre alunos encontrados.",
+  "Sem acesso": "Aluno com page_views = 0 e participations = 0 no analytics do Canvas. Mesmo assim a mensagem pode chegar pela Inbox do Canvas e por email so se a notificacao estiver ativa.",
+  Pendentes: "Quantidade de alunos com requisitos de modulos ainda nao concluidos no Canvas.",
+  "Sem atividade": "Quantidade de alunos cujo last_activity_at ficou alem do limite configurado.",
+  "Baixa atividade": "Quantidade de alunos com total_activity_time abaixo do limite configurado.",
+  Modulo: "Indica se o curso tem requisitos de modulos configurados para medir pendencias.",
+  "Status API": "Mostra se analytics, progresso de modulos e atividade de enrollments vieram disponiveis do Canvas.",
+  Aluno: "Nome do aluno que entrou no preview ou no lote.",
+  Acessos: "Visualizacoes e participacoes retornadas pelo analytics do Canvas para o aluno.",
+  Atividade: "Ultima atividade registrada e tempo total de atividade acumulado pelo Canvas.",
+  Recursos: "Quantidade de requisitos concluidos sobre o total de requisitos configurados no curso.",
+  Motivo: "Resumo do por que o aluno entrou no filtro atual de inatividade.",
+  Estrategia: "Forma usada para enviar a mensagem: por usuarios ou por contexto da turma.",
+  Enviados: "Quantidade que o painel conseguiu enviar de fato naquele registro.",
+  Anexo: "Arquivo anexado ao comunicado ou a mensagem daquele lote, quando existir.",
+  Publicado: "Indica se o aviso foi publicado no Canvas ou ficou como rascunho/agendado.",
+  Status: "Estado final do processamento daquele item no painel.",
+  Erro: "Mensagem retornada pelo painel ou pelo Canvas quando houve falha.",
+  ID: "Identificador retornado pelo Canvas para o recurso criado.",
+  Indicador: "Metrica agregada usada no comparativo entre periodos.",
+  Atual: "Valor do periodo atual.",
+  Anterior: "Valor do periodo anterior equivalente.",
+  Delta: "Diferenca entre o periodo atual e o periodo anterior equivalente.",
+  Tipo: "Tipo de job, evento ou operacao registrada.",
+  "Lotes atuais": "Quantidade de lotes no periodo atual.",
+  "Lotes anteriores": "Quantidade de lotes no periodo anterior equivalente.",
+  "Taxa atual": "Taxa de sucesso do periodo atual.",
+  "Taxa anterior": "Taxa de sucesso do periodo anterior equivalente.",
+  "Dry run": "Quantidade de execucoes em modo teste, sem envio real.",
+  Data: "Data consolidada do registro ou do agregado exibido.",
+  Comunicados: "Quantidade de comunicados processados no periodo ou na data.",
+  Mensagens: "Quantidade de mensagens de Inbox processadas no periodo ou na data.",
+  Inativos: "Quantidade de execucoes do modulo de alunos inativos.",
+  Concluidos: "Quantidade de jobs concluídos com sucesso.",
+  Falhas: "Quantidade de jobs que terminaram com erro.",
+  Execucoes: "Quantidade de execucoes para aquele curso ou grupo.",
+  "Delta exec.": "Variacao de execucoes em relacao ao periodo anterior.",
+  Sucesso: "Quantidade de execucoes ou envios bem-sucedidos.",
+  Falha: "Quantidade de execucoes ou envios com falha.",
+  "Delta msg.": "Variacao no volume de mensagens enviadas em relacao ao periodo anterior.",
+  Primeira: "Primeira publicacao prevista ou registrada para a recorrencia.",
+  Ocorrencias: "Quantidade total de repeticoes configuradas na recorrencia.",
+  Futuros: "Quantidade de itens futuros ainda pendentes no Canvas.",
+  Cancelados: "Quantidade de itens cancelados no Canvas ou no controle local.",
+};
+
+function renderTableHeader(column) {
+  const help = column.help || TABLE_COLUMN_HELP[column.label] || "";
+  return `
+    <div class="table-head-wrap">
+      <span>${escapeHtml(column.label)}</span>
+      ${help ? `
+        <details class="table-help">
+          <summary aria-label="Explicar ${escapeHtml(column.label)}">?</summary>
+          <div class="table-help-popover">${escapeHtml(help)}</div>
+        </details>
+      ` : ""}
+    </div>
+  `;
+}
+
 function renderTable(columns, rows) {
   return `
     <div class="table-wrap">
       <table>
-        <thead><tr>${columns.map((column) => `<th>${escapeHtml(column.label)}</th>`).join("")}</tr></thead>
+        <thead><tr>${columns.map((column) => `<th>${renderTableHeader(column)}</th>`).join("")}</tr></thead>
         <tbody>${rows.map((row) => `<tr>${columns.map((column) => `<td>${column.format(row)}</td>`).join("")}</tr>`).join("")}</tbody>
       </table>
     </div>

@@ -10,7 +10,7 @@ Painel web local para operar em lote no Canvas LMS usando apenas endpoints ofici
 - publica comunicados em lote
 - publica comunicados em lote com anexo opcional
 - cria recorrencias de avisos no proprio Canvas
-- permite placeholders por disciplina em comunicados e avisos recorrentes (`{{course_name}}`, `{{course_ref}}`, `{{course_code}}`)
+- permite placeholders seguros por disciplina e aluno (`{{course_name}}`, `{{student_name}}`)
 - valida placeholders com blocos arrastaveis em comunicados, recorrencia e caixa de entrada
 - envia mensagens pela caixa de entrada do Canvas em lote com anexo opcional
 - envia mensagens para alunos inativos com base em analytics e progresso de modulos
@@ -47,12 +47,14 @@ Painel web local para operar em lote no Canvas LMS usando apenas endpoints ofici
 - resumo operacional do lote antes do envio
 - preview com placeholders por disciplina
 - revisao final antes de enfileirar
+- erros com foco automatico no campo necessario
 
 ### Caixa de entrada
 
 - resumo operacional com estrategia final, deduplicacao e anexo
 - indica quando `{{student_name}}` força personalizacao por aluno
 - revisao final antes de enfileirar
+- erros com foco automatico no campo necessario
 
 ### Recorrencia
 
@@ -61,6 +63,14 @@ Painel web local para operar em lote no Canvas LMS usando apenas endpoints ofici
 - preview obrigatorio e revisao final antes de criar ou salvar
 - agenda das proximas publicacoes
 - lista com filtros por status e linha temporal
+- erros com foco automatico no campo necessario
+
+### Inativos
+
+- fluxo vertical com `Resumo da selecao`, `Mensagem`, `Quem vai receber` e `Resultado do envio`
+- secoes recolhiveis com animacao suave
+- tabela com ajuda contextual por coluna
+- bloco explicativo para `Sem acesso`, `Pendentes`, `Sem atividade` e `Baixa atividade`
 
 ## Revisao antes do envio
 
@@ -96,8 +106,14 @@ Nos modulos `Comunicados`, `Recorrencia` e `Caixa de entrada` existe uma barra d
 Variaveis suportadas:
 
 - `{{course_name}}`
-- `{{course_ref}}`
-- `{{course_code}}`
+- `{{student_name}}`
+
+No modulo `Inativos`, o foco tambem ficou em:
+
+- `{{student_name}}`
+- `{{course_name}}`
+
+Os placeholders tecnicos antigos de numero e codigo de curso foram removidos da interface para reduzir ruido visual e erro operacional.
 
 ## Como funciona a Recorrencia
 
@@ -169,6 +185,19 @@ O modulo `Inativos` foi feito para o fluxo:
 - nao e um envio direto de email
 - o aluno pode receber notificacao por email se as preferencias dele no Canvas estiverem configuradas para isso
 - o criterio de `recursos pendentes` depende de requisitos de modulos configurados no curso
+
+### Como ler os indicadores
+
+- `Sem acesso`
+  aluno com `page_views = 0` e `participations = 0` no analytics do Canvas
+- `Pendentes`
+  aluno com requisitos de modulos ainda nao concluidos
+- `Sem atividade`
+  aluno com `last_activity_at` alem do limite configurado
+- `Baixa atividade`
+  aluno com `total_activity_time` abaixo do teto em minutos informado no filtro
+- mesmo em `Sem acesso`, o aluno ainda pode receber a mensagem
+  o envio vai para a Inbox do Canvas e o email depende das notificacoes dele
 
 ## Anexos nativos no Canvas
 
@@ -457,6 +486,7 @@ Arquivos gerados:
 - relatorio HTML: `ui-audit/report/html/index.html`
 - resumo consolidado: `ui-audit/report/summary.json`
 - plano de acao: `docs/ui_audit_action_plan.md`
+- checklist manual: `docs/manual_test_checklist.md`
 
 Importante:
 
@@ -489,6 +519,7 @@ Canva_Api/
 |-- requirements-dev.txt
 |-- docs/
 |   |-- database_erd.md
+|   |-- manual_test_checklist.md
 |   `-- ui_audit_action_plan.md
 |-- src/
 |   |-- app_factory.py
