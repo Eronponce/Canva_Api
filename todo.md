@@ -1,0 +1,6 @@
+AO buscar classes em filtros e necessárioe ntrar me foco o filtro a todo momento, n tem como fazr algo dinamico?
+ao improtar a disciplina nao aparece o codigo da dsiciplina por exemplo  o curso courses/34053 fica como GPR@100Avisos, esse gpr seria bom ao falar sobre a disciplina em todos os filtros, 
+buscar quem nao fez integradora ou outras atividades
+quais sao todos os camos do inativo etc, o que eles fazem? preciso?
+os relatorios, muitas coisas inuteis que quero remover. somente deixar o que preciso.
+eu quero uma navegação diferente no inativos e no recorrencia, eu quero que abra modais obrigatorios que eu so consiga ir pro proximo passo A FAzer ele, como se fosse o modal de confirmação, mas ele vai anbrinddo, pra eu ir validando, entao so teria o buscar, e abrirria os modais no fim tenso os relatorios de quantos alunos os cursos etc, eu quero que as regras sejam mais facieis e menoes, ( somente o que eu querio, que é o tempo de acesso em  minutos e se nunca acessou, eu quero implementar pra poder mandar uma mensagem pra quem nao fez a ava 5 etc )
