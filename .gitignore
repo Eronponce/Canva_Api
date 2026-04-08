@@ -8,6 +8,7 @@ venv/
 build/
 dist/
 .pytest_cache/
+.pytest-tmp/
 node_modules/
 playwright-report/
 test-results/

@@ -1,4 +1,4 @@
-# Canvas Bulk Panel
+﻿# Canvas Bulk Panel
 
 Painel web local para operar em lote no Canvas LMS usando apenas endpoints oficiais da API.
 
@@ -52,7 +52,7 @@ Painel web local para operar em lote no Canvas LMS usando apenas endpoints ofici
 ### Caixa de entrada
 
 - resumo operacional com estrategia final, deduplicacao e anexo
-- indica quando `{{student_name}}` força personalizacao por aluno
+- indica quando `{{student_name}}` forÃ§a personalizacao por aluno
 - revisao final antes de enfileirar
 - erros com foco automatico no campo necessario
 
@@ -335,6 +335,29 @@ conda activate canvas-bulk-panel
 python -m pip install -r requirements.txt
 ```
 
+### Com Docker
+
+O repositorio agora inclui `Dockerfile` e `docker-compose.yml` para subir o painel em container mantendo:
+
+- `.env` editavel pelo proprio painel
+- `data/` persistente para SQLite, JSONs e CSVs
+- `logs/` persistente para diagnostico local
+
+No WSL Debian, entre na pasta montada:
+
+```bash
+cd /mnt/c/Eron_Lab/Canva_Api
+cp .env.example .env
+docker compose up --build -d
+```
+
+Para acompanhar:
+
+```bash
+docker compose ps
+docker compose logs -f panel
+```
+
 ### Para testes automatizados
 
 ```powershell
@@ -375,6 +398,27 @@ Regras importantes:
 ```powershell
 python app.py
 ```
+
+### Com Docker Compose
+
+Depois de criar o `.env`, suba o painel:
+
+```bash
+docker compose up --build -d
+```
+
+Para parar sem apagar dados locais:
+
+```bash
+docker compose down
+```
+
+Persistencia e configuracao no modo Docker:
+
+- `./.env` fica montado em `/app/.env`
+- `./data` fica montado em `/app/data`
+- `./logs` fica montado em `/app/logs`
+- o `docker-compose.yml` ja publica a porta `5000` e sobrescreve `FLASK_HOST` para `0.0.0.0`
 
 ### Com os atalhos locais
 
@@ -494,6 +538,15 @@ Importante:
 - ela nao envia nada para o Canvas real
 - o app sobe isolado em `http://127.0.0.1:5070`
 
+## Codex customization
+
+O repositorio agora inclui customizacao nativa para Codex:
+
+- `AGENTS.md` no root com regras persistentes do projeto
+- `src/AGENTS.md` e `static/AGENTS.md` com orientacoes proximas do codigo
+- skills de repositorio em `.agents/skills` para QA manual e release
+
+Veja os detalhes em `docs/codex_customization.md`.
 ## Empacotamento
 
 Build local com PyInstaller:
@@ -607,3 +660,4 @@ Authorization: Bearer <token>
 GET /api/v1/courses/123/bulk_user_progress
 Authorization: Bearer <token>
 ```
+

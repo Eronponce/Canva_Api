@@ -1,0 +1,17 @@
+.git
+.gitignore
+.agents
+.pytest_cache
+.venv
+venv
+__pycache__
+node_modules
+playwright-report
+test-results
+ui-audit/report
+ui-audit/runtime-data
+build
+dist
+logs
+data
+.env

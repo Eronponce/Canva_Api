@@ -1,5 +1,19 @@
 # Changelog
 
+## v1.2.0 - 2026-04-08
+
+### Infra e operacao
+
+- adicionados `Dockerfile`, `.dockerignore` e `docker-compose.yml` para subir o painel em container
+- persistencia de `data/`, `logs/` e `.env` mantida via bind mounts locais
+- README atualizado com fluxo de uso em Docker e exemplo pensado para WSL Debian
+
+### Customizacao para Codex
+
+- adicionados `AGENTS.md`, `src/AGENTS.md` e `static/AGENTS.md` com orientacoes persistentes do projeto
+- adicionadas skills de repositório para QA manual e fluxo de release
+- documentado o modelo de customizacao em `docs/codex_customization.md`
+
 ## v1.1.0 - 2026-04-03
 
 Release focada em visual improvements, clareza operacional e polish de UX.
