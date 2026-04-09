@@ -24,3 +24,4 @@ data/*.json
 data/*.db
 data/reports/*.csv
 !data/reports/.gitkeep
+/pytest-of-eronp
