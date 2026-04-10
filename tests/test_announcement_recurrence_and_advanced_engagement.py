@@ -47,6 +47,36 @@ class FakeCanvasClient:
                 {"user_id": 3, "last_activity_at": (now - timedelta(days=20)).isoformat().replace("+00:00", "Z"), "total_activity_time": 300},
             ],
         }
+        self.assignments = {
+            "101": [{"id": 501, "name": "Assign Calculo", "published": True, "submission_types": ["online_upload"]}],
+            "202": [{"id": 502, "name": "Assign Fisica", "published": True, "submission_types": ["online_upload"]}],
+        }
+        self.quizzes = {
+            "101": [
+                {"id": 601, "title": "Quiz Calculo 1", "published": True},
+                {"id": 602, "title": "Quiz Calculo 2", "published": True},
+                {"id": 603, "title": "Quiz Calculo 3", "published": True},
+                {"id": 604, "title": "Quiz Calculo 4", "published": True},
+            ],
+            "202": [
+                {"id": 701, "title": "Quiz Fisica 1", "published": True},
+                {"id": 702, "title": "Quiz Fisica 2", "published": True},
+                {"id": 703, "title": "Quiz Fisica 3", "published": True},
+                {"id": 704, "title": "Quiz Fisica 4", "published": True},
+            ],
+        }
+        self.assignment_submissions = {
+            "101": {
+                "501": [{"user_id": 2, "workflow_state": "submitted", "submitted_at": now.isoformat().replace("+00:00", "Z")}],
+            },
+            "202": {
+                "502": [],
+            },
+        }
+        self.quiz_submissions = {
+            "101": {str(quiz_id): [] for quiz_id in [601, 602, 603, 604]},
+            "202": {str(quiz_id): [] for quiz_id in [701, 702, 703, 704]},
+        }
         self.contexts = {
             101: {"id": "course_101", "name": "Calculo I"},
             202: {"id": "course_202", "name": "Fisica I"},
@@ -67,11 +97,20 @@ class FakeCanvasClient:
     def list_course_student_summaries(self, course_ref, student_id=None):
         return self.analytics[str(course_ref)]
 
-    def get_bulk_user_progress(self, course_ref):
-        return self.progress[str(course_ref)]
-
     def list_course_student_enrollments(self, course_ref):
         return self.enrollments[str(course_ref)]
+
+    def list_course_assignments(self, course_ref):
+        return self.assignments[str(course_ref)]
+
+    def list_course_quizzes(self, course_ref):
+        return self.quizzes[str(course_ref)]
+
+    def list_assignment_submissions(self, course_ref, assignment_id):
+        return self.assignment_submissions[str(course_ref)][str(assignment_id)]
+
+    def list_quiz_submissions(self, course_ref, quiz_id):
+        return self.quiz_submissions[str(course_ref)][str(quiz_id)]
 
     def find_messageable_context(self, *, course_id, course_name):
         return self.contexts.get(int(course_id))
@@ -372,7 +411,7 @@ def test_announcement_recurrence_update_removes_only_deselected_course(client, a
     assert payload["item"]["future_items"] == 2
 
 
-def test_advanced_engagement_filters_use_enrollments(client, app, monkeypatch):
+def test_engagement_filters_use_selected_inactivity_and_assignment_lookup(client, app, monkeypatch):
     services = app.extensions["services"]
     fake_client = FakeCanvasClient()
     monkeypatch.setattr(services["connection_service"], "build_client", lambda payload: fake_client)
@@ -383,21 +422,22 @@ def test_advanced_engagement_filters_use_enrollments(client, app, monkeypatch):
             **_connection_payload(),
             "target_mode": "courses",
             "course_refs": ["101", "202"],
-            "criteria_mode": "never_accessed_or_incomplete_resources",
-            "criteria_config": {
-                "match_mode": "or",
-                "inactive_days": 14,
-                "max_total_activity_minutes": 10,
-            },
+            "criteria_modes": ["low_total_activity", "missing_assignment"],
+            "criteria_config": {"max_total_activity_minutes": 10},
         },
     )
     assert response.status_code == 200
     payload = response.get_json()
     assert payload["summary"]["total_students_found"] == 3
-    assert payload["summary"]["total_inactive_days_matches"] == 2
+    assert payload["summary"]["total_missing_assignment_matches"] == 2
     assert payload["summary"]["total_low_activity_matches"] == 2
+    assert payload["summary"]["total_unique_students_matched"] == 2
+    assert payload["summary"]["total_target_messages"] == 4
+    assert payload["summary"]["total_activities_checked"] == 2
     assert payload["summary"]["top_priority_course_name"]
     assert payload["courses"][0]["urgency_score"] >= payload["courses"][-1]["urgency_score"]
-    matched_names = {item["student_name"] for item in payload["items"]}
-    assert "Aluno 1" in matched_names
-    assert "Aluno 3" in matched_names
+    matched_names_by_kind = {(item["student_name"], item["message_kind"]) for item in payload["items"]}
+    assert ("Aluno 1", "inactivity") in matched_names_by_kind
+    assert ("Aluno 1", "missing_activity") in matched_names_by_kind
+    assert ("Aluno 3", "inactivity") in matched_names_by_kind
+    assert ("Aluno 3", "missing_activity") in matched_names_by_kind

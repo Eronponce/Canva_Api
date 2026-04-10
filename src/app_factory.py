@@ -52,7 +52,7 @@ def create_app() -> Flask:
     connection_service = ConnectionService(app_config)
     course_service = CourseService(connection_service, group_repository, course_repository)
     env_service = EnvService(app_config)
-    announcement_service = AnnouncementService(app_config, connection_service, job_manager)
+    announcement_service = AnnouncementService(app_config, connection_service, job_manager, job_repository)
     announcement_recurrence_service = AnnouncementRecurrenceService(connection_service, course_service, announcement_recurrence_repository)
     message_service = MessageService(app_config, connection_service, job_manager)
     engagement_service = EngagementService(app_config, connection_service, job_manager)

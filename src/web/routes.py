@@ -317,11 +317,37 @@ def preview_message_recipients():
 @web.post("/api/engagement/inactive-targets")
 def preview_engagement_targets():
     raw_payload = request.get_json(silent=True) or {}
-    payload, _course_refs = _with_resolved_courses(
+    payload, course_refs = _with_resolved_courses(
         raw_payload,
         "Selecione ao menos um grupo ou curso para a busca ativa.",
     )
     result = services()["engagement_service"].preview_targets(payload)
+    if bool(raw_payload.get("save_report")):
+        credentials = services()["connection_service"].resolve_credentials(raw_payload)
+        criteria_modes = payload.get("criteria_modes") or []
+        job_manager = services()["job_manager"]
+        job = job_manager.create_job(
+            kind="engagement",
+            title="Previa de inativos",
+            base_url=credentials["base_url"],
+            request_payload=_safe_request_payload(payload),
+            request_token_source="inline" if (raw_payload.get("access_token") or raw_payload.get("api_token")) else services()["connection_service"].app_config.default_token_source,
+            requested_strategy=",".join(criteria_modes) or (payload.get("criteria_mode") or "never_accessed,low_total_activity"),
+            effective_strategy="preview_only",
+            dry_run=True,
+            dedupe=False,
+            summary={
+                "course_refs": course_refs,
+                "group_ids": _job_group_ids(raw_payload),
+                "select_all_groups": bool(raw_payload.get("select_all_groups")),
+                "preview_only": True,
+            },
+        )
+        try:
+            result["report_job"] = services()["engagement_service"].complete_preview_report(job["id"], payload, result)
+        except Exception as exc:  # noqa: BLE001
+            job_manager.fail(job["id"], str(exc))
+            raise
     return jsonify(result)
 
 
@@ -341,7 +367,7 @@ def create_engagement_job():
         base_url=credentials["base_url"],
         request_payload=_safe_request_payload(payload),
         request_token_source="inline" if (raw_payload.get("access_token") or raw_payload.get("api_token")) else services()["connection_service"].app_config.default_token_source,
-        requested_strategy=(payload.get("criteria_mode") or "never_accessed_or_incomplete_resources"),
+        requested_strategy=",".join(payload.get("criteria_modes") or []) or (payload.get("criteria_mode") or "never_accessed,low_total_activity"),
         effective_strategy="individual_users",
         dry_run=bool(payload.get("dry_run")),
         dedupe=False,
@@ -441,6 +467,28 @@ def download_csv(job_id: str):
         item["report_filename"],
         as_attachment=True,
     )
+
+
+@web.get("/api/history/<job_id>/announcements/<announcement_id>/edit")
+def get_history_announcement_edit_target(job_id: str, announcement_id: str):
+    course_ref = str(request.args.get("course_ref") or "").strip()
+    result = services()["announcement_service"].get_edit_target(
+        job_id,
+        course_ref=course_ref,
+        announcement_id=announcement_id,
+    )
+    return jsonify(result)
+
+
+@web.put("/api/history/<job_id>/announcements/<announcement_id>")
+def update_history_announcement(job_id: str, announcement_id: str):
+    payload = request.get_json(silent=True) or {}
+    result = services()["announcement_service"].update_history_announcement(
+        job_id,
+        announcement_id=announcement_id,
+        payload=payload,
+    )
+    return jsonify(result)
 
 
 def register_error_handlers(app) -> None:

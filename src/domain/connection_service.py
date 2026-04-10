@@ -9,30 +9,40 @@ class ConnectionService:
         self.app_config = app_config
 
     def resolve_credentials(self, payload: dict) -> dict:
-        base_url = normalize_base_url(payload.get("base_url") or self.app_config.default_base_url)
+        environment_credentials = self.app_config.canvas_credentials_for_environment(payload.get("canvas_environment"))
+        base_url = normalize_base_url(payload.get("base_url") or environment_credentials["base_url"])
         access_token = (
             payload.get("access_token")
             or payload.get("api_token")
-            or self.app_config.default_access_token
+            or environment_credentials["access_token"]
         ).strip()
         token_type = (payload.get("token_type") or "personal").strip() or "personal"
+        used_env_token = not bool(payload.get("access_token") or payload.get("api_token"))
 
         if not base_url:
+            base_url_var = "CANVAS_BASE_URL_TEST" if environment_credentials["environment"] == "test" else "CANVAS_BASE_URL"
             raise ValueError(
                 "Informe a URL base do Canvas, por exemplo "
                 "`https://sua-instituicao.instructure.com` ou `https://sua-instituicao.test.instructure.com`, "
-                "ou configure `CANVAS_BASE_URL` no `.env`."
+                f"ou configure `{base_url_var}` no `.env`."
             )
         if not access_token:
+            token_hint = (
+                "`CANVAS_ACCESS_TOKEN_TEST`, `CANVAS_PERSONAL_ACCESS_TOKEN_TEST` ou `CANVAS_API_TOKEN_TEST`"
+                if environment_credentials["environment"] == "test"
+                else "`CANVAS_ACCESS_TOKEN`, `CANVAS_PERSONAL_ACCESS_TOKEN` ou `CANVAS_API_TOKEN`"
+            )
             raise ValueError(
-                "Informe um `token de acesso` ou configure `CANVAS_ACCESS_TOKEN`, "
-                "`CANVAS_PERSONAL_ACCESS_TOKEN` ou `CANVAS_API_TOKEN` no `.env`."
+                f"Informe um `token de acesso` ou configure {token_hint} no `.env`."
             )
 
         return {
             "base_url": base_url,
             "access_token": access_token,
             "token_type": token_type,
+            "canvas_environment": environment_credentials["environment"],
+            "used_env_token": used_env_token,
+            "env_token_source": environment_credentials["token_source"] if used_env_token else "interface",
         }
 
     def build_client(self, payload: dict) -> CanvasClient:
@@ -53,10 +63,11 @@ class ConnectionService:
         return {
             "ok": True,
             "base_url": credentials["base_url"],
-            "used_env_token": not bool(payload.get("access_token") or payload.get("api_token")),
+            "canvas_environment": credentials["canvas_environment"],
+            "used_env_token": credentials["used_env_token"],
             "masked_token": mask_token(credentials["access_token"]),
             "token_type": credentials["token_type"],
-            "env_token_source": self.app_config.default_token_source,
+            "env_token_source": credentials["env_token_source"],
             "user": {
                 "id": user.get("id"),
                 "name": user.get("name") or user.get("short_name"),

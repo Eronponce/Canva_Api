@@ -35,6 +35,25 @@ def _resolve_env_value(name: str, env_values: dict[str, str], default: str = "")
     return default
 
 
+def _normalize_canvas_environment(value: str | None) -> str:
+    normalized = str(value or "").strip().lower()
+    if normalized in {"test", "teste", "testing", "beta", "sandbox"}:
+        return "test"
+    return "real"
+
+
+def _resolve_canvas_token(env_values: dict[str, str], *, suffix: str = "") -> tuple[str, str]:
+    token_names = [
+        (f"CANVAS_ACCESS_TOKEN{suffix}", f"access_token{suffix.lower()}"),
+        (f"CANVAS_PERSONAL_ACCESS_TOKEN{suffix}", f"personal_access_token{suffix.lower()}"),
+        (f"CANVAS_API_TOKEN{suffix}", f"api_token{suffix.lower()}"),
+    ]
+    for env_name, source in token_names:
+        if _resolve_env_value(env_name, env_values):
+            return _resolve_env_value(env_name, env_values), source
+    return "", "none"
+
+
 @dataclass(slots=True)
 class AppConfig:
     host: str
@@ -64,6 +83,10 @@ class AppConfig:
     registered_courses_file: Path
     env_file: Path
     app_log_file: Path
+    test_base_url: str = ""
+    test_access_token: str = ""
+    test_token_source: str = "none"
+    default_canvas_environment: str = "real"
 
     @classmethod
     def from_env(cls) -> "AppConfig":
@@ -93,19 +116,8 @@ class AppConfig:
             f"sqlite:///{database_file.as_posix()}",
         )
 
-        default_access_token = _first_non_empty(
-            _resolve_env_value("CANVAS_ACCESS_TOKEN", env_values),
-            _resolve_env_value("CANVAS_PERSONAL_ACCESS_TOKEN", env_values),
-            _resolve_env_value("CANVAS_API_TOKEN", env_values),
-        )
-
-        default_token_source = "none"
-        if _resolve_env_value("CANVAS_ACCESS_TOKEN", env_values):
-            default_token_source = "access_token"
-        elif _resolve_env_value("CANVAS_PERSONAL_ACCESS_TOKEN", env_values):
-            default_token_source = "personal_access_token"
-        elif _resolve_env_value("CANVAS_API_TOKEN", env_values):
-            default_token_source = "api_token"
+        default_access_token, default_token_source = _resolve_canvas_token(env_values)
+        test_access_token, test_token_source = _resolve_canvas_token(env_values, suffix="_TEST")
 
         return cls(
             host=os.getenv("FLASK_HOST", "127.0.0.1"),
@@ -121,6 +133,10 @@ class AppConfig:
             default_base_url=_resolve_env_value("CANVAS_BASE_URL", env_values),
             default_access_token=default_access_token,
             default_token_source=default_token_source,
+            test_base_url=_resolve_env_value("CANVAS_BASE_URL_TEST", env_values),
+            test_access_token=test_access_token,
+            test_token_source=test_token_source,
+            default_canvas_environment=_normalize_canvas_environment(_resolve_env_value("CANVAS_ENVIRONMENT", env_values)),
             code_root=packaged_root,
             runtime_root=runtime_root,
             templates_dir=packaged_root / "templates",
@@ -165,21 +181,14 @@ class AppConfig:
 
         self.default_base_url = _resolve_env_value("CANVAS_BASE_URL", env_values)
 
-        default_access_token = _first_non_empty(
-            _resolve_env_value("CANVAS_ACCESS_TOKEN", env_values),
-            _resolve_env_value("CANVAS_PERSONAL_ACCESS_TOKEN", env_values),
-            _resolve_env_value("CANVAS_API_TOKEN", env_values),
-        )
+        default_access_token, default_token_source = _resolve_canvas_token(env_values)
         self.default_access_token = default_access_token
-
-        default_token_source = "none"
-        if _resolve_env_value("CANVAS_ACCESS_TOKEN", env_values):
-            default_token_source = "access_token"
-        elif _resolve_env_value("CANVAS_PERSONAL_ACCESS_TOKEN", env_values):
-            default_token_source = "personal_access_token"
-        elif _resolve_env_value("CANVAS_API_TOKEN", env_values):
-            default_token_source = "api_token"
         self.default_token_source = default_token_source
+        test_access_token, test_token_source = _resolve_canvas_token(env_values, suffix="_TEST")
+        self.test_base_url = _resolve_env_value("CANVAS_BASE_URL_TEST", env_values)
+        self.test_access_token = test_access_token
+        self.test_token_source = test_token_source
+        self.default_canvas_environment = _normalize_canvas_environment(_resolve_env_value("CANVAS_ENVIRONMENT", env_values))
 
         self.request_timeout = int(_first_non_empty(_resolve_env_value("CANVAS_REQUEST_TIMEOUT", env_values), str(self.request_timeout)))
         self.retry_max_attempts = int(_first_non_empty(_resolve_env_value("CANVAS_RETRY_MAX_ATTEMPTS", env_values), str(self.retry_max_attempts)))
@@ -198,6 +207,11 @@ class AppConfig:
             "default_base_url": self.default_base_url,
             "env_token_available": bool(self.default_access_token),
             "env_token_source": self.default_token_source,
+            "active_environment": self.default_canvas_environment,
+            "canvas_environments": {
+                "real": self.canvas_environment_settings("real"),
+                "test": self.canvas_environment_settings("test"),
+            },
             "database_backend": database_backend,
             "database_url_masked": self._mask_database_url(),
             "request_timeout": self.request_timeout,
@@ -207,6 +221,44 @@ class AppConfig:
             "legacy_json_import_enabled": self.legacy_json_import_enabled,
             "env_file_path": str(self.env_file),
             "env_file_name": self.env_file.name,
+        }
+
+    def canvas_environment_settings(self, environment: str) -> dict:
+        key = _normalize_canvas_environment(environment)
+        if key == "test":
+            return {
+                "key": "test",
+                "label": "Ambiente de teste",
+                "base_url_var": "CANVAS_BASE_URL_TEST",
+                "token_var": self.test_token_source,
+                "default_base_url": self.test_base_url,
+                "env_token_available": bool(self.test_access_token),
+                "env_token_source": self.test_token_source,
+            }
+        return {
+            "key": "real",
+            "label": "Ambiente real",
+            "base_url_var": "CANVAS_BASE_URL",
+            "token_var": self.default_token_source,
+            "default_base_url": self.default_base_url,
+            "env_token_available": bool(self.default_access_token),
+            "env_token_source": self.default_token_source,
+        }
+
+    def canvas_credentials_for_environment(self, environment: str) -> dict:
+        key = _normalize_canvas_environment(environment)
+        if key == "test":
+            return {
+                "environment": "test",
+                "base_url": self.test_base_url,
+                "access_token": self.test_access_token,
+                "token_source": self.test_token_source,
+            }
+        return {
+            "environment": "real",
+            "base_url": self.default_base_url,
+            "access_token": self.default_access_token,
+            "token_source": self.default_token_source,
         }
 
     def _mask_database_url(self) -> str:

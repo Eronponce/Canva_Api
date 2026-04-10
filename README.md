@@ -5,20 +5,24 @@ Painel web local para operar em lote no Canvas LMS usando apenas endpoints ofici
 ## O que o sistema faz
 
 - valida conexao com o Canvas usando `base_url` e token vindos da tela ou do `.env`
+- alterna entre ambiente real e ambiente de teste do Canvas direto na aba de conexao
 - organiza cursos cadastrados e grupos de turmas
 - busca no Canvas os cursos acessiveis e permite cadastrar varios de uma vez
+- destaca o codigo curto da disciplina em seletores e filtros, por exemplo `GPR@100Avisos` aparece como `GPR | 100Avisos`
 - publica comunicados em lote
 - publica comunicados em lote com anexo opcional
 - cria recorrencias de avisos no proprio Canvas
+- conduz `Recorrencia` por modal guiado e `Inativos` por tela continua com relatorio salvo
 - permite placeholders seguros por disciplina e aluno (`{{course_name}}`, `{{student_name}}`)
 - valida placeholders com blocos arrastaveis em comunicados, recorrencia e caixa de entrada
 - envia mensagens pela caixa de entrada do Canvas em lote com anexo opcional
-- envia mensagens para alunos inativos com base em analytics e progresso de modulos
+- envia mensagens para alunos inativos ou com atividade objetiva/atividade integradora pendente
 - prioriza turmas e alunos inativos por nivel de risco no preview antes do envio
 - revisa o alvo antes do envio em comunicados, caixa de entrada e inativos
 - compara periodo atual vs periodo anterior equivalente nos relatorios
 - gera alertas executivos e destaques operacionais na aba de relatorios
 - registra historico, resultados por turma e exportacao em CSV
+- permite editar comunicados ja criados no Canvas a partir do detalhe do relatorio
 - permite limpar todo o banco local com confirmacao digitada
 
 ## Modulos da interface
@@ -34,7 +38,7 @@ Painel web local para operar em lote no Canvas LMS usando apenas endpoints ofici
 5. `Caixa de entrada`
    mensagens em lote por grupos salvos ou cursos especificos, com anexo opcional e preview
 6. `Inativos`
-   mensagem para alunos sem acesso nenhum ou com recursos pendentes
+   mensagem para alunos inativos ou com atividade objetiva/atividade integradora pendente
 7. `Configuracoes`
    resumo operacional, editor do `.env` e zona de perigo
 8. `Relatorios`
@@ -58,7 +62,7 @@ Painel web local para operar em lote no Canvas LMS usando apenas endpoints ofici
 
 ### Recorrencia
 
-- criacao no formulario principal
+- criacao pelo fluxo guiado em modal
 - edicao em modal separado
 - preview obrigatorio e revisao final antes de criar ou salvar
 - agenda das proximas publicacoes
@@ -67,10 +71,14 @@ Painel web local para operar em lote no Canvas LMS usando apenas endpoints ofici
 
 ### Inativos
 
-- fluxo vertical com `Resumo da selecao`, `Mensagem`, `Quem vai receber` e `Resultado do envio`
+- busca direta, sem modal intermediario antes do relatorio
+- filtro simplificado, sem regras avancadas ocultas
+- fluxo vertical com `Resumo da selecao`, `Relatorio de inativos`, `Mensagem` e `Resultado do envio`
 - secoes recolhiveis com animacao suave
-- tabela com ajuda contextual por coluna
-- bloco explicativo para `Sem acesso`, `Pendentes`, `Sem atividade` e `Baixa atividade`
+- recolhimento rapido pelos controles do topo e do rodape das secoes mais longas
+- relatorio consolidado sem duplicata por aluno
+- graficos com percentual de quem fez tudo, quem nunca entrou, quem ficou abaixo dos minutos e quem nao realizou atividade objetiva ou integradora
+- possibilidade de salvar a busca na aba `Relatorios` e carregar a analise novamente na aba `Inativos`
 
 ## Revisao antes do envio
 
@@ -119,6 +127,8 @@ Os placeholders tecnicos antigos de numero e codigo de curso foram removidos da 
 
 O modulo `Recorrencia` e focado em `avisos`.
 
+Na criacao, o botao `Abrir fluxo guiado` abre um modal em etapas: primeiro valida destino, depois conteudo e agenda, depois gera o relatorio final com turmas e total de avisos. O operador so consegue abrir a revisao final depois que o preview estiver atualizado.
+
 Em vez de depender de um scheduler local, ele:
 
 1. resolve os cursos alvo
@@ -161,43 +171,57 @@ Se a mudanca for total e voce preferir recomecar:
 O modulo `Inativos` foi feito para o fluxo:
 
 1. escolher grupos salvos ou cursos especificos
-2. escolher o criterio
-3. buscar a quantidade por turma
-4. revisar quem vai receber
-5. enviar a mensagem
+2. escolher um ou mais filtros: `Nunca entrou`, `Menos que X minutos`, `Nao realizou a atividade objetiva` e `Nao realizou a atividade integradora`
+3. clicar em `Buscar inativos`
+4. descer na propria tela para ver graficos, consolidado por aluno e resumo por turma
+5. baixar o CSV ou abrir a mesma busca na aba `Relatorios`
+6. revisar as duas mensagens possiveis e o envio final
+
+O uso comum fica concentrado nos filtros escolhidos e no relatorio salvo da busca. O preview mostra primeiro o resumo geral, depois os graficos e as tabelas consolidadas, sem duplicar o mesmo aluno em varias linhas do relatorio principal.
 
 ### Criterios suportados
 
-- `Sem acesso nenhum`
-  usa `page_views = 0` e `participations = 0`
-- `Com recursos pendentes`
-  usa requisitos de modulos nao concluidos
-- `Sem acesso nenhum ou com recursos pendentes`
-- `Sem atividade ha X dias`
-  usa `last_activity_at` dos enrollments
-- `Atividade total ate X minutos`
-  usa `total_activity_time` dos enrollments
-- combinacao avancada `OU` e `E`
+- `Nunca entrou`
+  usa `page_views = 0` e `participations = 0` no analytics do Canvas
+- `Menos que X minutos`
+  usa `total_activity_time` dos enrollments e o limite de minutos informado
+- `Nao realizou a atividade objetiva`
+  busca automaticamente as atividades objetivas publicadas e avaliativas de cada disciplina e marca quem deixou pelo menos uma sem submissao feita
+- `Nao realizou a atividade integradora`
+  busca automaticamente as atividades integradoras publicadas, avaliadas e com entrega online rastreavel de cada disciplina e marca quem deixou pelo menos uma sem submissao feita
 
 ### Importante
 
 - o envio acontece pela `Inbox` do Canvas usando `Conversations`
 - nao e um envio direto de email
 - o aluno pode receber notificacao por email se as preferencias dele no Canvas estiverem configuradas para isso
-- o criterio de `recursos pendentes` depende de requisitos de modulos configurados no curso
+- existem dois blocos de mensagem: um para `Inatividade` (`Nunca entrou` e `Menos que X minutos`) e outro para `Atividade objetiva/integradora pendente`
+- o mesmo aluno pode receber os dois comunicados se cair nos dois grupos de filtro
+- nao precisa colar link de atividade; o painel lista as atividades avaliativas e quizzes publicados de cada turma antes de checar as submissoes
+- para evitar falsos positivos em massa, `Nao realizou a atividade integradora` ignora item sem entrega online rastreavel (`none`, `on_paper`, `online_quiz`), item `not_graded`, rascunho e atividade de zero ponto
+- atividade entregue, mesmo ainda sem correcao/nota, e considerada feita quando o Canvas retorna `submitted_at`, estado de submissao ou conteudo enviado como anexo, URL ou texto
+- `Nao realizou a atividade objetiva` ignora atividade objetiva de treino ou pesquisa nao avaliativa
+- se uma turma tiver 4 quizzes publicados, o aluno entra no alvo se deixou qualquer um desses quizzes sem fazer
+- cada busca de `Inativos` feita pela interface cria uma `Previa de inativos` na aba `Relatorios`, com CSV consolidado por aluno para conferencia manual antes do envio
+- o proprio card de preview em `Inativos` mostra `Baixar CSV da previa` e `Abrir previa em Relatorios` logo apos a busca
+- a aba `Relatorios` permite reabrir a analise de `Inativos` na propria tela de `Inativos`, mantendo os graficos e o consolidado acessiveis
 
 ### Como ler os indicadores
 
-- `Sem acesso`
-  aluno com `page_views = 0` e `participations = 0` no analytics do Canvas
-- `Pendentes`
-  aluno com requisitos de modulos ainda nao concluidos
-- `Sem atividade`
-  aluno com `last_activity_at` alem do limite configurado
-- `Baixa atividade`
-  aluno com `total_activity_time` abaixo do teto em minutos informado no filtro
-- mesmo em `Sem acesso`, o aluno ainda pode receber a mensagem
-  o envio vai para a Inbox do Canvas e o email depende das notificacoes dele
+- `Nunca entrou`
+  aluno sem page views e sem participacoes no analytics do Canvas
+- `Poucos minutos`
+  aluno abaixo do limite de minutos informado
+- `Ativ. objetiva`
+  quantidade de alunos com pelo menos uma atividade objetiva publicada sem submissao feita
+- `Ativ. integradora`
+  quantidade de alunos com pelo menos uma atividade integradora publicada sem submissao feita
+- `Comunicados`
+  quantidade de mensagens previstas; pode ser maior que o total de alunos alvo quando alguem cai nos dois grupos
+- `Atividades`
+  total de atividades avaliativas ou quizzes avaliativos que o painel verificou na disciplina
+- `Faltando`
+  nomes das atividades publicadas que ainda nao aparecem como feitas para o aluno
 
 ## Anexos nativos no Canvas
 
@@ -271,6 +295,8 @@ O painel agora suporta anexos nativos nos modulos:
 
 - `POST /api/v1/courses/:course_id/discussion_topics`
   com `is_announcement=true`
+- `PUT /api/v1/courses/:course_id/discussion_topics/:topic_id`
+  para corrigir titulo, mensagem e bloqueio de comentarios de comunicados ja criados
 - `DELETE /api/v1/courses/:course_id/discussion_topics/:topic_id`
 
 ### Caixa de entrada
@@ -281,8 +307,11 @@ O painel agora suporta anexos nativos nos modulos:
 ### Inativos
 
 - `GET /api/v1/courses/:course_id/analytics/student_summaries`
-- `GET /api/v1/courses/:course_id/bulk_user_progress`
 - `GET /api/v1/courses/:course_id/enrollments?type[]=StudentEnrollment`
+- `GET /api/v1/courses/:course_id/assignments`
+- `GET /api/v1/courses/:course_id/quizzes`
+- `GET /api/v1/courses/:course_id/assignments/:assignment_id/submissions`
+- `GET /api/v1/courses/:course_id/quizzes/:quiz_id/submissions?include[]=submission`
 - `POST /api/v1/conversations`
 
 ## Persistencia de dados
@@ -380,6 +409,11 @@ CANVAS_BASE_URL=
 CANVAS_ACCESS_TOKEN=
 CANVAS_PERSONAL_ACCESS_TOKEN=
 CANVAS_API_TOKEN=
+CANVAS_BASE_URL_TEST=
+CANVAS_ACCESS_TOKEN_TEST=
+CANVAS_PERSONAL_ACCESS_TOKEN_TEST=
+CANVAS_API_TOKEN_TEST=
+CANVAS_ENVIRONMENT=real
 ENABLE_LEGACY_JSON_IMPORT=false
 HISTORY_LIMIT=25
 ```
@@ -387,7 +421,10 @@ HISTORY_LIMIT=25
 Regras importantes:
 
 - o token digitado na interface tem prioridade sobre o `.env`
-- se a `Base URL` da tela ficar vazia, o painel usa `CANVAS_BASE_URL` do `.env`
+- se a `Base URL` da tela ficar vazia, o painel usa a variavel do ambiente selecionado: `CANVAS_BASE_URL` para real ou `CANVAS_BASE_URL_TEST` para teste
+- o switch da aba `Conexao` alterna entre ambiente real e teste, e envia `canvas_environment` para todos os fluxos que usam o Canvas
+- `CANVAS_ENVIRONMENT=test` pode iniciar o painel ja no ambiente de teste, mas o operador ainda pode trocar pela interface
+- o topo do painel mostra o ambiente ativo, a base efetiva e a origem do token
 - o campo de token da tela fica vazio por seguranca, mesmo com token no `.env`
 - o `.env` nao e recriado nem resetado ao iniciar o painel
 
@@ -454,14 +491,15 @@ http://127.0.0.1:5000
 ## Fluxo recomendado de uso
 
 1. abra `Conexao` e valide o acesso ao Canvas
-2. abra `Organizacao`
-3. use o `Catalogo do Canvas` para carregar e cadastrar os cursos
-4. crie grupos com os cursos desejados
-5. use `Comunicados` para avisos pontuais
-6. use `Recorrencia` para gerar varios avisos futuros de uma vez
-7. use `Caixa de entrada` para mensagens em lote
-8. use `Inativos` para campanhas direcionadas a quem precisa de acompanhamento
-9. confira `Relatorios` e baixe o CSV quando necessario
+2. use o switch para confirmar se o ambiente ativo e `Real` ou `Teste`
+3. abra `Organizacao`
+4. use o `Catalogo do Canvas` para carregar e cadastrar os cursos
+5. crie grupos com os cursos desejados
+6. use `Comunicados` para avisos pontuais
+7. use `Recorrencia` para gerar varios avisos futuros de uma vez
+8. use `Caixa de entrada` para mensagens em lote
+9. use `Inativos` para campanhas direcionadas a quem precisa de acompanhamento
+10. confira `Relatorios` e baixe o CSV quando necessario
 
 ## Como validar em ambiente de teste do Canvas
 
@@ -497,8 +535,22 @@ Observacoes:
 - recorrencias ativas
 - falhas recentes
 - historico detalhado por job
+- edicao de comunicados criados com sucesso no Canvas
 
 Os jobs de `Comunicados`, `Caixa de entrada` e `Inativos` entram no mesmo historico.
+
+### Editar comunicado pelo relatorio
+
+No detalhe de um lote de `Comunicados`, cada turma criada com sucesso e fora de `Modo teste` mostra a acao `Editar`.
+O topo do detalhe tambem mostra `Editar avisos do lote` quando ha mais de um comunicado elegivel para correcao rapida.
+
+O painel abre um modal com o titulo e a mensagem finais. Na edicao por lote, cada turma aparece em um card proprio com status de salvamento. Ao salvar, ele atualiza os `Discussion Topics` existentes no Canvas usando os `announcement_id` registrados no historico local.
+
+Observacoes:
+
+- anexos antigos permanecem como estavam
+- registros de `Modo teste`, falhas e linhas sem `announcement_id` nao podem ser editados
+- a edicao usa o token informado na aba `Conexao` ou o token configurado no `.env`
 
 ## Testes do projeto
 
@@ -647,17 +699,38 @@ Content-Type: application/x-www-form-urlencoded
 recipients[]=1234&subject=Aviso&body=Mensagem&context_code=course_123
 ```
 
-### Buscar analytics dos alunos
+### Buscar acesso e minutos de inativos
 
 ```http
 GET /api/v1/courses/123/analytics/student_summaries
 Authorization: Bearer <token>
 ```
 
-### Buscar progresso de modulos
-
 ```http
-GET /api/v1/courses/123/bulk_user_progress
+GET /api/v1/courses/123/enrollments?type[]=StudentEnrollment
 Authorization: Bearer <token>
 ```
 
+### Buscar atividades de inativos
+
+```http
+GET /api/v1/courses/123/assignments
+Authorization: Bearer <token>
+```
+
+```http
+GET /api/v1/courses/123/quizzes
+Authorization: Bearer <token>
+```
+
+### Buscar submissao de assign ou quiz
+
+```http
+GET /api/v1/courses/123/assignments/456/submissions
+Authorization: Bearer <token>
+```
+
+```http
+GET /api/v1/courses/123/quizzes/789/submissions?include[]=submission
+Authorization: Bearer <token>
+```

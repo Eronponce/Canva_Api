@@ -67,6 +67,13 @@ def _with_timezone(value: datetime | None, timezone_name: str | None) -> datetim
     return value
 
 
+def _short_course_code(course_code: str | None) -> str:
+    normalized = str(course_code or "").strip()
+    if not normalized:
+        return ""
+    return normalized.split("@", 1)[0].strip() or normalized
+
+
 class CourseRepository:
     def __init__(self, database):
         self.database = database
@@ -180,6 +187,7 @@ class CourseRepository:
             "canvas_course_id": row.canvas_course_id,
             "course_name": row.course_name,
             "course_code": row.course_code,
+            "course_code_short": _short_course_code(row.course_code),
             "term_name": row.term_name,
             "workflow_state": row.workflow_state,
             "source_type": row.source_type,
@@ -422,6 +430,7 @@ class GroupRepository:
                     "course_ref": course.course_ref,
                     "course_name": course.course_name,
                     "course_code": course.course_code,
+                    "course_code_short": _short_course_code(course.course_code),
                     "term_name": course.term_name,
                     "canvas_course_id": course.canvas_course_id,
                     "workflow_state": course.workflow_state,
@@ -555,6 +564,130 @@ class JobRepository:
             rows = session.scalars(stmt).all()
             return [self._serialize_job(item, include_logs=False) for item in rows]
 
+    def get_announcement_edit_target(self, *, job_public_id: str, course_ref: str, announcement_id: int | str) -> dict | None:
+        normalized_job_id = str(job_public_id or "").strip()
+        normalized_course_ref = str(course_ref or "").strip()
+        normalized_announcement_id = str(announcement_id or "").strip()
+        if not normalized_job_id or not normalized_course_ref or not normalized_announcement_id:
+            return None
+
+        with self.database.session_scope() as session:
+            row = session.scalar(
+                select(JobRun)
+                .options(selectinload(JobRun.course_results))
+                .where(JobRun.public_id == normalized_job_id)
+            )
+            if row is None:
+                return None
+
+            course_result = next(
+                (
+                    item
+                    for item in row.course_results
+                    if item.course_ref_snapshot == normalized_course_ref
+                    and str(item.announcement_id or "") == normalized_announcement_id
+                ),
+                None,
+            )
+            if course_result is None:
+                return None
+
+            raw_result = dict(course_result.raw_result_json or {})
+            return {
+                "job_id": row.public_id,
+                "job_kind": row.kind,
+                "job_status": row.status,
+                "job_title": row.title,
+                "base_url": row.base_url,
+                "request_payload": dict(row.request_payload_json or {}),
+                "course_ref": course_result.course_ref_snapshot,
+                "course_id": course_result.course_id,
+                "canvas_course_id": raw_result.get("course_id"),
+                "course_name": course_result.course_name_snapshot,
+                "row_status": course_result.status,
+                "announcement_id": course_result.announcement_id,
+                "announcement_url": course_result.announcement_url,
+                "published": course_result.published,
+                "delayed_post_at": course_result.delayed_post_at,
+                "dry_run": course_result.dry_run,
+                "raw_result": raw_result,
+            }
+
+    def record_announcement_edit(
+        self,
+        *,
+        job_public_id: str,
+        course_ref: str,
+        announcement_id: int | str,
+        title: str,
+        message_html: str,
+        lock_comment: bool,
+        canvas_response: dict,
+    ) -> dict | None:
+        normalized_job_id = str(job_public_id or "").strip()
+        normalized_course_ref = str(course_ref or "").strip()
+        normalized_announcement_id = str(announcement_id or "").strip()
+        now = utc_now()
+        edited_at = datetime_to_iso(now)
+
+        with self.database.session_scope() as session:
+            row = session.scalar(
+                select(JobRun)
+                .options(selectinload(JobRun.course_results))
+                .where(JobRun.public_id == normalized_job_id)
+            )
+            if row is None:
+                return None
+
+            course_result = next(
+                (
+                    item
+                    for item in row.course_results
+                    if item.course_ref_snapshot == normalized_course_ref
+                    and str(item.announcement_id or "") == normalized_announcement_id
+                ),
+                None,
+            )
+            if course_result is None:
+                return None
+
+            raw_result = dict(course_result.raw_result_json or {})
+            edit_history = list(raw_result.get("edit_history") or [])
+            edit_history.append(
+                {
+                    "edited_at": edited_at,
+                    "title": title,
+                    "lock_comment": lock_comment,
+                }
+            )
+
+            raw_result.update(
+                {
+                    "title": title,
+                    "message_html": message_html,
+                    "lock_comment": lock_comment,
+                    "edited": True,
+                    "edited_at": edited_at,
+                    "edit_history": edit_history,
+                    "last_canvas_response": {
+                        "id": canvas_response.get("id"),
+                        "html_url": canvas_response.get("html_url"),
+                        "published": canvas_response.get("published"),
+                    },
+                }
+            )
+
+            course_result.raw_result_json = raw_result
+            course_result.announcement_url = canvas_response.get("html_url") or course_result.announcement_url
+            if "published" in canvas_response:
+                course_result.published = canvas_response.get("published")
+            course_result.error_message = None
+            course_result.updated_at = now
+            row.updated_at = now
+            session.flush()
+            session.refresh(course_result)
+            return self._serialize_course_result(course_result)
+
     def _sync_targets(self, session, job_row: JobRun, summary: dict) -> None:
         existing_group_map = {item.group_public_id: item for item in job_row.target_groups}
         desired_group_ids = [str(item) for item in summary.get("group_ids", []) if str(item).strip()]
@@ -681,6 +814,7 @@ class JobRepository:
 
     @staticmethod
     def _serialize_course_result(row: JobCourseResult) -> dict:
+        raw_result = row.raw_result_json or {}
         return {
             "course_ref": row.course_ref_snapshot,
             "course_id": row.course_id,
@@ -696,6 +830,12 @@ class JobRepository:
             "batch_count": row.batch_count,
             "announcement_id": row.announcement_id,
             "announcement_url": row.announcement_url,
+            "announcement_title": raw_result.get("title") or "",
+            "announcement_message_html": raw_result.get("message_html") or "",
+            "announcement_lock_comment": raw_result.get("lock_comment"),
+            "announcement_edited": bool(raw_result.get("edited")),
+            "announcement_edited_at": raw_result.get("edited_at"),
+            "attachment_name": raw_result.get("attachment_name") or "",
             "conversation_ids": row.conversation_ids_json or [],
             "published": row.published,
             "delayed_post_at": row.delayed_post_at,

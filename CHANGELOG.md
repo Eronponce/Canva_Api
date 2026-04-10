@@ -1,5 +1,44 @@
 # Changelog
 
+## Unreleased
+
+## v1.3.0 - 2026-04-10
+
+### Conexao
+
+- adicionado switch entre ambiente real e ambiente de teste na aba `Conexao`
+- adicionadas variaveis `.env` `CANVAS_BASE_URL_TEST` e `CANVAS_ACCESS_TOKEN_TEST` para credenciais de teste
+- adicionado indicador no topo com ambiente ativo, base efetiva e origem do token
+- filtros dos seletores de cursos/grupos agora aplicam apos 3 segundos sem digitar, Enter ou saida do campo, evitando perda de foco a cada tecla
+
+### Organizacao
+
+- codigos de disciplina no formato `GPR@100Avisos` agora aparecem como codigo curto `GPR` nos filtros, seletores e lista de cursos
+
+### Recorrencia e Inativos
+
+- `Recorrencia` segue com fluxo guiado por modal antes da revisao final
+- `Inativos` agora permite selecionar os filtros `Nunca entrou`, `Menos que X minutos`, `Nao realizou a atividade objetiva` e `Nao realizou a atividade integradora`
+- removidos os campos avancados de modulos, dias sem atividade e combinacao `E/OU` do painel de `Inativos`
+- adicionada busca automatica de quizzes e atividades avaliativas publicados de cada disciplina antes de verificar as submissoes no Canvas
+- adicionados dois modelos de mensagem para `Inativos`: um comunicado de inatividade e outro de atividade objetiva/integradora pendente, com preview antes do envio
+- filtro de `Nao realizou a atividade integradora` agora ignora atividades sem entrega online rastreavel, nao avaliadas, rascunhos e itens de zero ponto para reduzir falsos positivos em massa
+- filtro de `Nao realizou a atividade objetiva` agora ignora atividades objetivas de treino ou pesquisa nao avaliativa e pede ao Canvas a submissao associada ao quiz
+- `Inativos` passou a abrir o relatorio na propria tela, sem modal intermediario na etapa de busca
+- cada busca de `Inativos` agora salva uma analise consolidada sem duplicata por aluno, com percentuais e detalhamento por turma
+- o relatorio de `Inativos` agora mostra graficos de `fez tudo`, `nunca entrou`, `menos de X minutos`, `atividade objetiva` e `atividade integradora`
+- a aba `Relatorios` agora consegue recarregar a analise salva novamente na aba `Inativos`
+- os blocos recolhiveis de `Inativos` agora aceitam clique na faixa direita do cabecalho e tambem no rodape da secao
+
+### Relatorios
+
+- adicionada edicao de comunicados ja criados no Canvas a partir do detalhe do relatorio
+- adicionada edicao em massa dos avisos editaveis de um lote de comunicados
+- cada busca de `Inativos` pela interface agora gera uma `Previa de inativos` na aba `Relatorios`, com CSV consolidado por aluno para conferencia manual
+- o preview de `Inativos` agora oferece botoes diretos para baixar o CSV da previa e abrir esse item em `Relatorios`
+- registros de dry-run, falha ou sem `announcement_id` ficam protegidos contra edicao
+- historico local passa a marcar titulo, mensagem e horario da ultima edicao do comunicado
+
 ## v1.2.0 - 2026-04-08
 
 ### Infra e operacao

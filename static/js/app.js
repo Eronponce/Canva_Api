@@ -13,6 +13,7 @@ const state = {
   reportDays: 30,
   recurrences: [],
   connectionSnapshot: null,
+  canvasEnvironment: null,
   envLoaded: false,
   envContent: "",
   envVisible: false,
@@ -32,9 +33,25 @@ const state = {
     payload: null,
     preview: null,
   },
+  guidedFlow: {
+    kind: null,
+    step: 0,
+    focusSelector: null,
+  },
   selectedReportId: null,
+  announcementEdit: {
+    jobId: null,
+    courseRef: null,
+    announcementId: null,
+    target: null,
+    mode: "single",
+    targets: [],
+  },
   templateFocusFieldId: null,
   pickerSearch: {},
+  pickerSearchDraft: {},
+  pickerSearchTimers: {},
+  pickerPointerDownRoot: null,
   pickerReorder: {},
   collapsedCards: {},
   announcement: {
@@ -86,6 +103,7 @@ document.addEventListener("DOMContentLoaded", () => {
   bindEvents();
   restoreUiState();
   toggleScheduleField();
+  toggleEngagementCriteriaFields();
   updateAnnouncementPreview();
   updateMessagePreview();
   updateRecurrenceSamplePreview();
@@ -106,6 +124,9 @@ function bindTabs() {
 }
 
 function bindEvents() {
+  document.querySelectorAll("[data-canvas-environment]").forEach((button) => {
+    button.addEventListener("click", () => setCanvasEnvironment(button.dataset.canvasEnvironment));
+  });
   $("#baseUrl").addEventListener("input", () => {
     state.connectionSnapshot = null;
     state.courseCatalog = [];
@@ -113,10 +134,13 @@ function bindEvents() {
     state.courseCatalogLoaded = false;
     clearMessagePreviewRecipients({ updatePreview: false });
     renderConnectionResult(null);
+    renderEnvironmentBanner();
     persistUiState();
   });
   $("#baseUrl").addEventListener("blur", () => {
     $("#baseUrl").value = normalizeBaseUrlInput($("#baseUrl").value);
+    renderEnvironmentBanner();
+    renderConnectionResult(state.connectionSnapshot);
     persistUiState();
   });
   $("#apiToken").addEventListener("input", () => {
@@ -126,6 +150,7 @@ function bindEvents() {
     state.courseCatalogLoaded = false;
     clearMessagePreviewRecipients({ updatePreview: false });
     renderConnectionResult(null);
+    renderEnvironmentBanner();
     persistUiState();
   });
   $("#tokenType").addEventListener("change", () => {
@@ -199,6 +224,18 @@ function bindEvents() {
       closeRecurrenceReviewModal();
     }
   });
+  $("#guidedFlowCancelBtn").addEventListener("click", closeGuidedFlowModal);
+  $("#guidedFlowBackBtn").addEventListener("click", backGuidedFlow);
+  $("#guidedFlowNextBtn").addEventListener("click", advanceGuidedFlow);
+  $("#guidedFlowEditBtn").addEventListener("click", closeGuidedFlowAndFocus);
+  $("#closeAnnouncementEditModalBtn").addEventListener("click", closeAnnouncementEditModal);
+  $("#cancelAnnouncementEditBtn").addEventListener("click", closeAnnouncementEditModal);
+  $("#announcementEditForm").addEventListener("submit", saveAnnouncementEdit);
+  $("#announcementEditModal").addEventListener("click", (event) => {
+    if (event.target.dataset.action === "close-announcement-edit-modal") {
+      closeAnnouncementEditModal();
+    }
+  });
 
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && !$("#groupModal").classList.contains("hidden")) {
@@ -215,6 +252,9 @@ function bindEvents() {
     }
     if (event.key === "Escape" && !$("#recurrenceReviewModal").classList.contains("hidden")) {
       closeRecurrenceReviewModal();
+    }
+    if (event.key === "Escape" && !$("#announcementEditModal").classList.contains("hidden")) {
+      closeAnnouncementEditModal();
     }
   });
 
@@ -251,6 +291,8 @@ function bindEvents() {
   document.addEventListener("click", handleDelegatedClick);
   document.addEventListener("input", handleDelegatedInput);
   document.addEventListener("change", handleDelegatedChange);
+  document.addEventListener("keydown", handleDelegatedKeyDown);
+  document.addEventListener("pointerdown", handleDelegatedPointerDown, true);
   document.addEventListener("focusin", handleDelegatedFocusIn);
   document.addEventListener("focusout", handleDelegatedFocusOut);
   document.addEventListener("dragstart", handleDelegatedDragStart);
@@ -358,6 +400,7 @@ function bindEvents() {
     renderRecurrences();
     persistUiState();
   });
+  $("#startRecurrenceGuideBtn").addEventListener("click", () => openGuidedFlow("recurrence"));
   $("#previewRecurrenceBtn").addEventListener("click", previewRecurrence);
   $("#recurrenceForm").addEventListener("submit", submitRecurrence);
   $("#recurrenceEditName").addEventListener("input", () => {
@@ -393,25 +436,25 @@ function bindEvents() {
     updateRecurrenceEditSamplePreview();
   });
 
-  $("#engagementCriteriaMode").addEventListener("change", () => {
-    state.engagement.preview = null;
-    renderTargetSummary("engagement");
-    renderEngagementPreview(null);
-    persistUiState();
+  [
+    "#engagementCriterionNeverAccessed",
+    "#engagementCriterionLowActivity",
+    "#engagementCriterionMissingQuiz",
+    "#engagementCriterionMissingAssignment",
+  ].forEach((selector) => {
+    $(selector).addEventListener("change", () => {
+      toggleEngagementCriteriaFields();
+      invalidateEngagementPreview();
+    });
   });
-  $("#engagementMatchMode").addEventListener("change", persistUiState);
-  $("#engagementInactiveDays").addEventListener("input", persistUiState);
-  $("#engagementMaxActivityMinutes").addEventListener("input", persistUiState);
-  $("#engagementOnlyModules").addEventListener("change", persistUiState);
-  $("#engagementRequireNeverAccessed").addEventListener("change", persistUiState);
-  $("#engagementRequireIncomplete").addEventListener("change", persistUiState);
-  $("#engagementSubject").addEventListener("input", () => {
-    updateEngagementMessagePreview();
-    persistUiState();
+  $("#engagementMaxActivityMinutes").addEventListener("input", () => {
+    invalidateEngagementPreview();
   });
-  $("#engagementMessage").addEventListener("input", () => {
-    updateEngagementMessagePreview();
-    persistUiState();
+  ["#engagementSubject", "#engagementMessage", "#engagementActivitySubject", "#engagementActivityMessage"].forEach((selector) => {
+    $(selector).addEventListener("input", () => {
+      updateEngagementMessagePreview();
+      persistUiState();
+    });
   });
   $("#engagementDryRun").addEventListener("change", () => {
     updateEngagementMessagePreview();
@@ -475,6 +518,24 @@ function handleDelegatedClick(event) {
     return;
   }
 
+  const loadEngagementReport = event.target.closest("[data-action='load-engagement-report']");
+  if (loadEngagementReport) {
+    loadEngagementReportIntoTab(loadEngagementReport.dataset.jobId);
+    return;
+  }
+
+  const editAnnouncement = event.target.closest("[data-action='edit-announcement']");
+  if (editAnnouncement) {
+    openAnnouncementEditModal(editAnnouncement);
+    return;
+  }
+
+  const editAnnouncementBatch = event.target.closest("[data-action='edit-announcement-batch']");
+  if (editAnnouncementBatch) {
+    openAnnouncementBatchEditModal(editAnnouncementBatch);
+    return;
+  }
+
   const recurrenceAction = event.target.closest("[data-recurrence-action]");
   if (recurrenceAction) {
     handleRecurrenceAction(recurrenceAction.dataset.recurrenceAction, recurrenceAction.dataset.recurrenceId);
@@ -490,14 +551,30 @@ function handleDelegatedClick(event) {
 function handleDelegatedInput(event) {
   const search = event.target.closest("[data-picker-search]");
   if (!search) return;
-  state.pickerSearch[search.dataset.pickerSearch] = search.value.trim().toLowerCase();
-  renderPickers();
+  queuePickerSearch(search.dataset.pickerSearch, search.value);
 }
 
 function handleDelegatedChange(event) {
   const checkbox = event.target.closest("[data-picker-checkbox]");
   if (!checkbox) return;
   togglePickerValue(checkbox.dataset.pickerCheckbox, checkbox.value, checkbox.checked, { deferRender: true });
+}
+
+function handleDelegatedKeyDown(event) {
+  const search = event.target.closest("[data-picker-search]");
+  if (!search || event.key !== "Enter") return;
+  event.preventDefault();
+  applyPickerSearch(search.dataset.pickerSearch, search.value, { preserveFocus: true });
+}
+
+function handleDelegatedPointerDown(event) {
+  const root = event.target.closest("[data-picker-root]");
+  state.pickerPointerDownRoot = root?.dataset.pickerRoot || null;
+  window.setTimeout(() => {
+    if (state.pickerPointerDownRoot === root?.dataset.pickerRoot) {
+      state.pickerPointerDownRoot = null;
+    }
+  }, 0);
 }
 
 function handleDelegatedFocusIn(event) {
@@ -528,17 +605,52 @@ function handleDelegatedFocusOut(event) {
   const root = event.target.closest("[data-picker-root]");
   if (!root) return;
   const pickerId = root.dataset.pickerRoot;
+  const search = event.target.closest("[data-picker-search]");
   const nextFocused = event.relatedTarget instanceof Element ? event.relatedTarget : null;
   if (nextFocused && root.contains(nextFocused)) {
     return;
+  }
+  if (state.pickerPointerDownRoot === pickerId || root.matches(":hover")) {
+    return;
+  }
+  if (search) {
+    applyPickerSearch(pickerId, search.value, { preserveFocus: false });
   }
   window.setTimeout(() => {
     const pickerRoot = document.querySelector(`#${pickerId} [data-picker-root="${pickerId}"]`);
     if (!pickerRoot) return;
     if (pickerRoot.contains(document.activeElement)) return;
+    if (state.pickerPointerDownRoot === pickerId || pickerRoot.matches(":hover")) return;
     state.pickerReorder[pickerId] = true;
     rerenderPickerById(pickerId);
   }, 40);
+}
+
+function queuePickerSearch(pickerId, value) {
+  const nextValue = String(value || "");
+  state.pickerSearchDraft[pickerId] = nextValue;
+  if (state.pickerSearchTimers[pickerId]) {
+    window.clearTimeout(state.pickerSearchTimers[pickerId]);
+  }
+  state.pickerSearchTimers[pickerId] = window.setTimeout(() => {
+    applyPickerSearch(pickerId, state.pickerSearchDraft[pickerId] || "", { preserveFocus: true });
+  }, 3000);
+}
+
+function applyPickerSearch(pickerId, value, options = {}) {
+  if (!pickerId) return;
+  if (state.pickerSearchTimers[pickerId]) {
+    window.clearTimeout(state.pickerSearchTimers[pickerId]);
+    state.pickerSearchTimers[pickerId] = null;
+  }
+  const normalized = String(value || "").trim().toLowerCase();
+  state.pickerSearch[pickerId] = normalized;
+  state.pickerSearchDraft[pickerId] = String(value || "");
+  rerenderPickerById(pickerId, {
+    preserveScroll: true,
+    preserveFocus: Boolean(options.preserveFocus),
+    searchValue: String(value || ""),
+  });
 }
 
 function handleDelegatedDragStart(event) {
@@ -586,6 +698,9 @@ function clearTemplateDragState() {
 function restoreUiState() {
   try {
     const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
+    if (saved.canvasEnvironment) {
+      state.canvasEnvironment = normalizeCanvasEnvironment(saved.canvasEnvironment);
+    }
     $("#tokenType").value = saved.tokenType || "personal";
     $("#announcementTitle").value = saved.announcementTitle || "";
     $("#announcementMessage").value = saved.announcementMessage || "";
@@ -610,15 +725,12 @@ function restoreUiState() {
     $("#recurrenceAgendaWindow").value = saved.recurrenceAgendaWindow || "30";
     $("#recurrenceListSearch").value = saved.recurrenceListSearch || "";
     $("#recurrenceListStatus").value = saved.recurrenceListStatus || "all";
-    $("#engagementCriteriaMode").value = saved.engagementCriteriaMode || "never_accessed_or_incomplete_resources";
-    $("#engagementMatchMode").value = saved.engagementMatchMode || "or";
-    $("#engagementInactiveDays").value = saved.engagementInactiveDays || "";
-    $("#engagementMaxActivityMinutes").value = saved.engagementMaxActivityMinutes || "";
-    $("#engagementOnlyModules").checked = Boolean(saved.engagementOnlyModules);
-    $("#engagementRequireNeverAccessed").checked = Boolean(saved.engagementRequireNeverAccessed);
-    $("#engagementRequireIncomplete").checked = Boolean(saved.engagementRequireIncomplete);
+    applyEngagementCriteriaSelection(saved.engagementCriteriaModes || saved.engagementCriteriaMode);
+    $("#engagementMaxActivityMinutes").value = String(saved.engagementMaxActivityMinutes || 10);
     $("#engagementSubject").value = saved.engagementSubject || "";
     $("#engagementMessage").value = saved.engagementMessage || "";
+    $("#engagementActivitySubject").value = saved.engagementActivitySubject || "";
+    $("#engagementActivityMessage").value = saved.engagementActivityMessage || "";
     $("#engagementDryRun").checked = Boolean(saved.engagementDryRun);
     state.reportDays = Number(saved.reportDays || 30);
     if ($("#reportDaysSelect")) {
@@ -656,6 +768,7 @@ function persistUiState() {
     STORAGE_KEY,
     JSON.stringify({
       activeTab,
+      canvasEnvironment: state.canvasEnvironment,
       tokenType: $("#tokenType").value,
       announcementTitle: $("#announcementTitle").value,
       announcementMessage: $("#announcementMessage").value,
@@ -680,15 +793,12 @@ function persistUiState() {
       recurrenceAgendaWindow: $("#recurrenceAgendaWindow").value,
       recurrenceListSearch: $("#recurrenceListSearch").value,
       recurrenceListStatus: $("#recurrenceListStatus").value,
-      engagementCriteriaMode: $("#engagementCriteriaMode").value,
-      engagementMatchMode: $("#engagementMatchMode").value,
-      engagementInactiveDays: $("#engagementInactiveDays").value,
+      engagementCriteriaModes: selectedEngagementCriteriaModes(),
       engagementMaxActivityMinutes: $("#engagementMaxActivityMinutes").value,
-      engagementOnlyModules: $("#engagementOnlyModules").checked,
-      engagementRequireNeverAccessed: $("#engagementRequireNeverAccessed").checked,
-      engagementRequireIncomplete: $("#engagementRequireIncomplete").checked,
       engagementSubject: $("#engagementSubject").value,
       engagementMessage: $("#engagementMessage").value,
+      engagementActivitySubject: $("#engagementActivitySubject").value,
+      engagementActivityMessage: $("#engagementActivityMessage").value,
       engagementDryRun: $("#engagementDryRun").checked,
       reportDays: state.reportDays,
       announcement: state.announcement,
@@ -742,6 +852,59 @@ function normalizeBaseUrlInput(value) {
   return /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
 }
 
+function normalizeCanvasEnvironment(value) {
+  return ["test", "teste", "testing", "beta", "sandbox"].includes(String(value || "").trim().toLowerCase())
+    ? "test"
+    : "real";
+}
+
+function canvasEnvironmentLabel(environment = state.canvasEnvironment) {
+  return normalizeCanvasEnvironment(environment) === "test" ? "Teste" : "Real";
+}
+
+function activeCanvasEnvironmentConfig() {
+  const environment = normalizeCanvasEnvironment(state.canvasEnvironment);
+  const environments = state.config?.canvas_environments || {};
+  return environments[environment] || {
+    key: environment,
+    label: environment === "test" ? "Ambiente de teste" : "Ambiente real",
+    base_url_var: environment === "test" ? "CANVAS_BASE_URL_TEST" : "CANVAS_BASE_URL",
+    default_base_url: environment === "test" ? "" : state.config?.default_base_url || "",
+    env_token_available: environment === "test" ? false : Boolean(state.config?.env_token_available),
+    env_token_source: environment === "test" ? "none" : state.config?.env_token_source,
+  };
+}
+
+function activeCanvasBaseUrl() {
+  return normalizeBaseUrlInput(activeCanvasEnvironmentConfig().default_base_url || "");
+}
+
+function activeCanvasEnvTokenAvailable() {
+  return Boolean(activeCanvasEnvironmentConfig().env_token_available);
+}
+
+function activeCanvasEnvTokenSource() {
+  return activeCanvasEnvironmentConfig().env_token_source || "none";
+}
+
+function setCanvasEnvironment(value) {
+  const nextEnvironment = normalizeCanvasEnvironment(value);
+  if (state.canvasEnvironment === nextEnvironment) return;
+  state.canvasEnvironment = nextEnvironment;
+  state.connectionSnapshot = null;
+  state.courseCatalog = [];
+  state.courseCatalogSelection = [];
+  state.courseCatalogLoaded = false;
+  $("#baseUrl").value = "";
+  $("#apiToken").value = "";
+  clearMessagePreviewRecipients({ updatePreview: false });
+  renderEnvironmentControls();
+  renderEnvironmentBanner();
+  renderConnectionResult(null);
+  persistUiState();
+  showNotice(`Ambiente alterado para ${canvasEnvironmentLabel(nextEnvironment)}. Campos manuais foram limpos para usar o .env desse ambiente.`, "info");
+}
+
 function clearFieldValidation() {
   document.querySelectorAll(".input-error").forEach((element) => {
     element.classList.remove("input-error");
@@ -769,15 +932,16 @@ function focusField(selector) {
 function ensureConnectionConfigured() {
   clearFieldValidation();
   const baseUrl = normalizeBaseUrlInput($("#baseUrl").value);
-  const effectiveBaseUrl = baseUrl || normalizeBaseUrlInput(state.config?.default_base_url || "");
+  const effectiveBaseUrl = baseUrl || activeCanvasBaseUrl();
   const accessToken = $("#apiToken").value.trim();
-  const envTokenAvailable = Boolean(state.config?.env_token_available);
+  const envTokenAvailable = activeCanvasEnvTokenAvailable();
+  const environmentConfig = activeCanvasEnvironmentConfig();
 
   if (!effectiveBaseUrl) {
     openTab("connection");
     markInvalid("#baseUrl");
     focusField("#baseUrl");
-    showNotice("Informe a URL base do Canvas ou configure a `CANVAS_BASE_URL` no `.env`.", "error");
+    showNotice(`Informe a URL base do Canvas ou configure a \`${environmentConfig.base_url_var || "CANVAS_BASE_URL"}\` no \`.env\`.`, "error");
     return false;
   }
 
@@ -812,6 +976,7 @@ function ensureTargetSelection(kind) {
 
 function getConnectionPayload() {
   return {
+    canvas_environment: normalizeCanvasEnvironment(state.canvasEnvironment),
     base_url: normalizeBaseUrlInput($("#baseUrl").value),
     access_token: $("#apiToken").value.trim(),
     token_type: $("#tokenType").value,
@@ -900,6 +1065,14 @@ function hideRecurrenceCancelNotice() {
   hideNoticeElement($("#recurrenceCancelNotice"));
 }
 
+function showAnnouncementEditNotice(message, type = "info") {
+  presentNotice($("#announcementEditNotice"), message, type);
+}
+
+function hideAnnouncementEditNotice() {
+  hideNoticeElement($("#announcementEditNotice"));
+}
+
 function setBusy(button, isBusy, busyText = "Processando...") {
   if (!button) return;
   if (!button.dataset.originalText) {
@@ -924,6 +1097,10 @@ async function loadInitialData() {
 async function loadConfig() {
   const data = await apiFetch("/api/config");
   state.config = data.settings || {};
+  const configuredEnvironment = normalizeCanvasEnvironment(state.config.active_environment || state.canvasEnvironment);
+  if (!["real", "test"].includes(state.canvasEnvironment) || !state.config.canvas_environments?.[state.canvasEnvironment]) {
+    state.canvasEnvironment = configuredEnvironment;
+  }
   state.groups = Array.isArray(data.groups) ? data.groups : [];
   state.registeredCourses = Array.isArray(data.registered_courses) ? data.registered_courses : [];
   state.recurrences = Array.isArray(data.announcement_recurrences) ? data.announcement_recurrences : [];
@@ -1004,6 +1181,8 @@ function renderAll() {
   renderEngagementPreview(state.engagement.preview);
   renderReports();
   renderSettingsInfo(state.config || {});
+  renderEnvironmentControls();
+  renderEnvironmentBanner();
   renderTemplateAssistants();
   updateAnnouncementPreview();
   updateMessagePreview();
@@ -1021,12 +1200,21 @@ function syncCollapsibleCards() {
   document.querySelectorAll("[data-collapsible-card]").forEach((card) => {
     const cardId = card.dataset.collapsibleCard;
     const body = card.querySelector(`[data-card-body="${cardId}"]`);
-    const button = card.querySelector(`[data-card-toggle="${cardId}"]`);
-    if (!body || !button) return;
+    const buttons = card.querySelectorAll(`[data-card-toggle="${cardId}"]`);
+    if (!body || !buttons.length) return;
     const collapsed = Boolean(state.collapsedCards[cardId]);
     card.classList.toggle("is-collapsed", collapsed);
-    button.setAttribute("aria-expanded", collapsed ? "false" : "true");
-    button.textContent = collapsed ? "Expandir" : "Recolher";
+    buttons.forEach((button) => {
+      const label = button.querySelector(".card-toggle-copy");
+      button.classList.toggle("is-collapsed", collapsed);
+      button.setAttribute("aria-expanded", collapsed ? "false" : "true");
+      button.setAttribute("aria-label", collapsed ? "Expandir secao" : "Recolher secao");
+      if (label) {
+        label.textContent = collapsed ? "Expandir" : "Recolher";
+      } else {
+        button.textContent = collapsed ? "Expandir" : "Recolher";
+      }
+    });
     body.style.maxHeight = collapsed ? "0px" : `${body.scrollHeight}px`;
   });
 }
@@ -1046,17 +1234,59 @@ function renderHeaderMetrics() {
   if (historyMetric) historyMetric.textContent = String(state.history.length);
 }
 
+function renderEnvironmentControls() {
+  document.querySelectorAll("[data-canvas-environment]").forEach((button) => {
+    const isActive = normalizeCanvasEnvironment(button.dataset.canvasEnvironment) === state.canvasEnvironment;
+    button.classList.toggle("active", isActive);
+    button.setAttribute("aria-pressed", isActive ? "true" : "false");
+  });
+}
+
+function renderEnvironmentBanner() {
+  const banner = $("#environmentBanner");
+  if (!banner) return;
+  const environment = normalizeCanvasEnvironment(state.canvasEnvironment);
+  const config = activeCanvasEnvironmentConfig();
+  const manualBaseUrl = normalizeBaseUrlInput($("#baseUrl").value);
+  const effectiveBaseUrl = manualBaseUrl || activeCanvasBaseUrl();
+  const manualToken = $("#apiToken").value.trim();
+  const tokenAvailable = Boolean(manualToken || activeCanvasEnvTokenAvailable());
+  const tokenLabel = manualToken
+    ? "Token manual no campo"
+    : activeCanvasEnvTokenAvailable()
+      ? `.env (${formatEnvTokenSource(activeCanvasEnvTokenSource())})`
+      : "Token nao configurado";
+  const statusClass = !effectiveBaseUrl || !tokenAvailable ? "environment-missing" : `environment-${environment}`;
+  banner.className = `environment-banner ${statusClass}`;
+  banner.innerHTML = `
+    <div>
+      <span>Ambiente atual</span>
+      <strong>${escapeHtml(canvasEnvironmentLabel(environment).toUpperCase())}</strong>
+    </div>
+    <div>
+      <span>Base ativa</span>
+      <strong class="mono">${escapeHtml(effectiveBaseUrl || `${config.base_url_var || "CANVAS_BASE_URL"} pendente`)}</strong>
+    </div>
+    <div>
+      <span>Token</span>
+      <strong>${escapeHtml(tokenLabel)}</strong>
+    </div>
+  `;
+}
+
 function renderConnectionResult(data) {
-  const envTokenAvailable = Boolean(state.config?.env_token_available);
+  const envTokenAvailable = activeCanvasEnvTokenAvailable();
+  const environmentConfig = activeCanvasEnvironmentConfig();
   const badge = $("#connectionStatusBadge");
   if (!data) {
     badge.className = `status-chip ${envTokenAvailable ? "status-info" : "status-warning"}`;
     badge.textContent = envTokenAvailable ? "pronto para testar" : "faltando token";
     $("#connectionResult").innerHTML = `
       <div class="summary-grid">
-        <div class="summary-card"><span>Base URL ativa</span><strong class="mono">${escapeHtml(normalizeBaseUrlInput($("#baseUrl").value) || state.config?.default_base_url || "-")}</strong></div>
+        <div class="summary-card"><span>Ambiente</span><strong>${escapeHtml(canvasEnvironmentLabel())}</strong></div>
+        <div class="summary-card"><span>Base URL ativa</span><strong class="mono">${escapeHtml(normalizeBaseUrlInput($("#baseUrl").value) || activeCanvasBaseUrl() || "-")}</strong></div>
         <div class="summary-card"><span>Token no .env</span><strong>${envTokenAvailable ? "Disponivel" : "Nao configurado"}</strong></div>
-        <div class="summary-card"><span>Origem padrao</span><strong>${escapeHtml(formatEnvTokenSource(state.config?.env_token_source))}</strong></div>
+        <div class="summary-card"><span>Origem padrao</span><strong>${escapeHtml(formatEnvTokenSource(environmentConfig.env_token_source))}</strong></div>
       </div>
     `;
     return;
@@ -1065,6 +1295,7 @@ function renderConnectionResult(data) {
   badge.textContent = "conexao validada";
   $("#connectionResult").innerHTML = `
     <div class="summary-grid">
+      <div class="summary-card"><span>Ambiente</span><strong>${escapeHtml(canvasEnvironmentLabel(data.canvas_environment || state.canvasEnvironment))}</strong></div>
       <div class="summary-card"><span>Base URL</span><strong class="mono">${escapeHtml(data.base_url || "-")}</strong></div>
       <div class="summary-card"><span>Usuario</span><strong>${escapeHtml(data.user?.name || "-")}</strong></div>
       <div class="summary-card"><span>ID</span><strong>${escapeHtml(String(data.user?.id || "-"))}</strong></div>
@@ -1084,6 +1315,7 @@ async function testConnection() {
     const data = await apiFetch("/api/connection/test", { method: "POST", body: getConnectionPayload() });
     state.connectionSnapshot = data;
     renderConnectionResult(data);
+    renderEnvironmentBanner();
     showNotice("Conexao validada com sucesso.", "success");
     if (document.querySelector(".tab-button.active")?.dataset.tab === "organization") {
       await maybeAutoLoadCourseCatalog({ force: true });
@@ -1105,7 +1337,7 @@ function renderRegisteredCourses() {
     <div class="course-card">
       <div class="compact-header">
         <div>
-          <strong>${escapeHtml(item.course_name || `Curso ${item.course_ref}`)}</strong>
+          <strong>${escapeHtml(courseLabel(item))}</strong>
           <div class="compact-meta">${escapeHtml(item.course_ref)}${item.course_code ? ` | ${escapeHtml(item.course_code)}` : ""}${item.term_name ? ` | ${escapeHtml(item.term_name)}` : ""}</div>
         </div>
         <button class="mini-btn danger" type="button" data-action="delete-course" data-course-ref="${escapeHtml(item.course_ref)}">Excluir</button>
@@ -1156,7 +1388,7 @@ async function addRegisteredCourse() {
     $("#registeredCourseInput").value = "";
     await loadConfig();
     renderAll();
-    showNotice(`Curso ${response.item.course_name || courseRef} cadastrado com sucesso.`, "success");
+    showNotice(`Curso ${courseLabel(response.item) || courseRef} cadastrado com sucesso.`, "success");
   } catch (error) {
     showNotice(error.message, "error");
   } finally {
@@ -1212,9 +1444,9 @@ async function loadCourseCatalogInternal(options = {}) {
 
 function hasUsableConnection() {
   const baseUrl = normalizeBaseUrlInput($("#baseUrl").value);
-  const effectiveBaseUrl = baseUrl || normalizeBaseUrlInput(state.config?.default_base_url || "");
+  const effectiveBaseUrl = baseUrl || activeCanvasBaseUrl();
   const accessToken = $("#apiToken").value.trim();
-  const envTokenAvailable = Boolean(state.config?.env_token_available);
+  const envTokenAvailable = activeCanvasEnvTokenAvailable();
   return Boolean(effectiveBaseUrl && (accessToken || envTokenAvailable));
 }
 
@@ -1300,7 +1532,7 @@ function renderGroups() {
       </div>
       ${group.description ? `<div class="compact-meta">${escapeHtml(group.description)}</div>` : ""}
       <div class="chips">
-        ${(group.courses || []).map((course) => `<span class="chip">${escapeHtml(course.course_name || course.course_ref)}</span>`).join("")}
+        ${(group.courses || []).map((course) => `<span class="chip">${escapeHtml(courseLabel(course))}</span>`).join("")}
       </div>
     </div>
   `).join("");
@@ -1685,6 +1917,484 @@ function hideRecurrenceReviewNotice() {
   hideNoticeElement($("#recurrenceReviewNotice"));
 }
 
+function openGuidedFlow(kind, step = 0) {
+  state.guidedFlow = { kind, step, focusSelector: null };
+  hideGuidedFlowNotice();
+  renderGuidedFlowModal();
+  $("#guidedFlowModal").classList.remove("hidden");
+  $("#guidedFlowModal").setAttribute("aria-hidden", "false");
+  $("#guidedFlowNextBtn").focus();
+}
+
+function closeGuidedFlowModal() {
+  state.guidedFlow = { kind: null, step: 0, focusSelector: null };
+  hideGuidedFlowNotice();
+  $("#guidedFlowModal").classList.add("hidden");
+  $("#guidedFlowModal").setAttribute("aria-hidden", "true");
+  $("#guidedFlowBody").innerHTML = "";
+  $("#guidedFlowProgress").innerHTML = "";
+}
+
+function closeGuidedFlowAndFocus() {
+  const selector = state.guidedFlow.focusSelector;
+  closeGuidedFlowModal();
+  if (selector) {
+    focusField(selector);
+  }
+}
+
+function showGuidedFlowNotice(message, type = "info") {
+  presentNotice($("#guidedFlowNotice"), message, type);
+}
+
+function hideGuidedFlowNotice() {
+  hideNoticeElement($("#guidedFlowNotice"));
+}
+
+function failGuidedFlow(message, selector = null) {
+  state.guidedFlow.focusSelector = selector;
+  showGuidedFlowNotice(message, "error");
+  renderGuidedFlowControls();
+  return false;
+}
+
+function guidedFlowSteps(kind) {
+  if (kind === "recurrence") {
+    return ["Destino", "Conteudo e agenda", "Relatorio final"];
+  }
+  return ["Destino e regras", "Relatorio de alunos", "Mensagem"];
+}
+
+function guidedFlowCopy(kind) {
+  if (kind === "recurrence") {
+    return {
+      title: "Criar recorrencia passo a passo",
+      subtitle: "Valide destino, conteudo, agenda e relatorio antes de criar os avisos futuros.",
+      nextLabels: ["Validar destino", "Gerar relatorio", "Abrir revisao final"],
+    };
+  }
+  return {
+    title: "Buscar inativos passo a passo",
+    subtitle: "Valide destino e regra simples, confira o relatorio de alunos e so depois revise a mensagem.",
+    nextLabels: ["Buscar alunos", "Validar mensagem", "Abrir revisao final"],
+  };
+}
+
+function renderGuidedFlowModal() {
+  const { kind, step } = state.guidedFlow;
+  if (!kind) return;
+  const copy = guidedFlowCopy(kind);
+  const steps = guidedFlowSteps(kind);
+  $("#guidedFlowTitle").textContent = copy.title;
+  $("#guidedFlowSubtitle").textContent = copy.subtitle;
+  $("#guidedFlowProgress").innerHTML = steps.map((label, index) => `
+    <div class="wizard-step ${index === step ? "active" : ""} ${index < step ? "done" : ""}">
+      <strong>${escapeHtml(String(index + 1))}</strong> ${escapeHtml(label)}
+    </div>
+  `).join("");
+  $("#guidedFlowBody").innerHTML = kind === "recurrence"
+    ? renderGuidedRecurrenceBody(step)
+    : renderGuidedEngagementBody(step);
+  renderGuidedFlowControls();
+}
+
+function renderGuidedFlowControls() {
+  const { kind, step, focusSelector } = state.guidedFlow;
+  if (!kind) return;
+  const labels = guidedFlowCopy(kind).nextLabels;
+  $("#guidedFlowBackBtn").disabled = step <= 0;
+  $("#guidedFlowNextBtn").textContent = labels[step] || "Continuar";
+  $("#guidedFlowNextBtn").dataset.originalText = $("#guidedFlowNextBtn").textContent;
+  $("#guidedFlowEditBtn").classList.toggle("hidden", !focusSelector);
+}
+
+function backGuidedFlow() {
+  if (!state.guidedFlow.kind || state.guidedFlow.step <= 0) return;
+  state.guidedFlow.step -= 1;
+  state.guidedFlow.focusSelector = null;
+  hideGuidedFlowNotice();
+  renderGuidedFlowModal();
+}
+
+async function advanceGuidedFlow() {
+  const { kind, step } = state.guidedFlow;
+  if (!kind) return;
+  hideGuidedFlowNotice();
+  state.guidedFlow.focusSelector = null;
+  const button = $("#guidedFlowNextBtn");
+  try {
+    if (kind === "recurrence") {
+      await advanceRecurrenceGuidedFlow(step, button);
+      return;
+    }
+    await advanceEngagementGuidedFlow(step, button);
+  } catch (error) {
+    showGuidedFlowNotice(error.message, "error");
+  } finally {
+    setBusy(button, false);
+  }
+}
+
+async function advanceRecurrenceGuidedFlow(step, button) {
+  if (step === 0) {
+    if (!validateGuidedConnection() || !validateGuidedTarget("recurrence")) return;
+    state.guidedFlow.step = 1;
+    renderGuidedFlowModal();
+    return;
+  }
+  if (step === 1) {
+    if (!validateGuidedRecurrenceForm()) return;
+    setBusy(button, true, "Gerando...");
+    await loadRecurrencePreviewForCurrentForm();
+    state.guidedFlow.step = 2;
+    renderGuidedFlowModal();
+    return;
+  }
+  const payload = buildRecurrenceRequestBody();
+  if (!recurrencePreviewIsCurrent("recurrence", payload)) {
+    state.guidedFlow.step = 1;
+    renderGuidedFlowModal();
+    failGuidedFlow("A recorrencia mudou depois do preview. Gere o relatorio novamente antes de revisar.", "#previewRecurrenceBtn");
+    return;
+  }
+  const preview = state.recurrence.preview;
+  closeGuidedFlowModal();
+  openRecurrenceReviewModal("create", payload, preview);
+}
+
+async function advanceEngagementGuidedFlow(step, button) {
+  if (step === 0) {
+    if (!validateGuidedConnection() || !validateGuidedTarget("engagement")) return;
+    if (!validateEngagementCriteriaSelection(showGuidedFlowNotice)) return;
+    setBusy(button, true, "Buscando...");
+    await loadEngagementPreviewForCurrentSelection();
+    state.guidedFlow.step = 1;
+    renderGuidedFlowModal();
+    return;
+  }
+  if (step === 1) {
+    if (!state.engagement.preview) {
+      state.guidedFlow.step = 0;
+      renderGuidedFlowModal();
+      failGuidedFlow("Busque os alunos antes de validar a mensagem.", "#previewEngagementBtn");
+      return;
+    }
+    if (!(state.engagement.preview.items || []).length) {
+      failGuidedFlow("Nenhum aluno entrou nesses filtros. Ajuste a selecao antes de seguir.", "#engagementCriterionNeverAccessed");
+      return;
+    }
+    state.guidedFlow.step = 2;
+    renderGuidedFlowModal();
+    return;
+  }
+  if (!validateGuidedEngagementMessage()) return;
+  const requestBody = buildEngagementRequestBody();
+  closeGuidedFlowModal();
+  openSendReviewModal("engagement", {
+    ...state.engagement.preview,
+    request: requestBody,
+  });
+}
+
+function validateGuidedConnection() {
+  const baseUrl = normalizeBaseUrlInput($("#baseUrl").value);
+  const effectiveBaseUrl = baseUrl || activeCanvasBaseUrl();
+  const accessToken = $("#apiToken").value.trim();
+  const envTokenAvailable = activeCanvasEnvTokenAvailable();
+  if (!effectiveBaseUrl) {
+    return failGuidedFlow("Configure a Base URL no ambiente selecionado antes de continuar.", "#baseUrl");
+  }
+  if (!accessToken && !envTokenAvailable) {
+    return failGuidedFlow("Configure um token no ambiente selecionado antes de continuar.", "#apiToken");
+  }
+  return true;
+}
+
+function validateGuidedTarget(kind) {
+  if (hasGuidedTargetSelection(kind)) return true;
+  return failGuidedFlow("Selecione pelo menos um grupo ou curso antes de continuar.", `${kind === "recurrence" ? "#recurrenceGroupPicker" : "#engagementGroupPicker"}`);
+}
+
+function hasGuidedTargetSelection(kind) {
+  const payload = getTargetPayload(kind);
+  if (payload.course_refs?.length) return true;
+  if (payload.select_all_groups) return state.groups.length > 0;
+  return Boolean(payload.group_ids?.length);
+}
+
+function validateGuidedRecurrenceForm() {
+  if (!validateGuidedConnection() || !validateGuidedTarget("recurrence")) return false;
+  if (hasInvalidTemplateTokens("recurrence")) {
+    return failGuidedFlow("Existem variaveis invalidas na recorrencia. Use apenas os blocos reconhecidos.", "#recurrenceTitle");
+  }
+  if (!$("#recurrenceTitle").value.trim()) {
+    markInvalid("#recurrenceTitle");
+    return failGuidedFlow("Informe o titulo da recorrencia antes de gerar o relatorio.", "#recurrenceTitle");
+  }
+  if (!$("#recurrenceMessage").value.trim()) {
+    markInvalid("#recurrenceMessage");
+    return failGuidedFlow("Informe a mensagem da recorrencia antes de gerar o relatorio.", "#recurrenceMessage");
+  }
+  if (!$("#recurrenceFirstPublishAt").value) {
+    markInvalid("#recurrenceFirstPublishAt");
+    return failGuidedFlow("Informe a primeira publicacao antes de gerar o relatorio.", "#recurrenceFirstPublishAt");
+  }
+  return true;
+}
+
+function validateGuidedEngagementMessage() {
+  if (!validateGuidedConnection() || !validateGuidedTarget("engagement")) return false;
+  if (!state.engagement.preview) {
+    return failGuidedFlow("Busque os alunos antes de abrir a revisao final.", "#previewEngagementBtn");
+  }
+  if (hasInvalidTemplateTokens("engagement")) {
+    return failGuidedFlow("Existem variaveis invalidas na mensagem. Use apenas os blocos reconhecidos.", "#engagementSubject");
+  }
+  if (selectedEngagementHasInactivity() && !$("#engagementSubject").value.trim()) {
+    markInvalid("#engagementSubject");
+    return failGuidedFlow("Informe o assunto da mensagem de inatividade antes da revisao final.", "#engagementSubject");
+  }
+  if (selectedEngagementHasInactivity() && !$("#engagementMessage").value.trim()) {
+    markInvalid("#engagementMessage");
+    return failGuidedFlow("Informe a mensagem de inatividade antes da revisao final.", "#engagementMessage");
+  }
+  if (selectedEngagementHasActivity() && !$("#engagementActivitySubject").value.trim()) {
+    markInvalid("#engagementActivitySubject");
+    return failGuidedFlow("Informe o assunto da mensagem de atividade objetiva/integradora antes da revisao final.", "#engagementActivitySubject");
+  }
+  if (selectedEngagementHasActivity() && !$("#engagementActivityMessage").value.trim()) {
+    markInvalid("#engagementActivityMessage");
+    return failGuidedFlow("Informe a mensagem de atividade objetiva/integradora antes da revisao final.", "#engagementActivityMessage");
+  }
+  return true;
+}
+
+function renderGuidedRecurrenceBody(step) {
+  const payload = buildRecurrenceRequestBody();
+  if (step === 0) {
+    return `
+      <article class="card review-card">
+        <div class="card-header compact-header">
+          <div>
+            <h3>1. Destino</h3>
+            <p>O fluxo so avanca se houver grupos ou cursos selecionados.</p>
+          </div>
+        </div>
+        ${renderGuidedTargetSummary("recurrence")}
+      </article>
+    `;
+  }
+  if (step === 1) {
+    return `
+      <div class="review-grid">
+        <article class="card review-card">
+          <div class="card-header compact-header">
+            <div>
+              <h3>2. Conteudo e agenda</h3>
+              <p>Confira os campos que vao gerar os avisos futuros.</p>
+            </div>
+          </div>
+          <div class="summary-grid">
+            ${metricCard("Nome interno", payload.name || "-")}
+            ${metricCard("Titulo", payload.title || "-")}
+            ${metricCard("Frequencia", payload.recurrence_type === "daily" ? "Diaria" : "Semanal")}
+            ${metricCard("Intervalo", payload.interval_value || 1)}
+            ${metricCard("Ocorrencias", payload.occurrence_count || 0)}
+            ${metricCard("Primeira", payload.first_publish_at_local ? formatLocalDateTimeLabel(payload.first_publish_at_local) : "-")}
+          </div>
+        </article>
+        <article class="card review-card">
+          <div class="card-header compact-header">
+            <div>
+              <h3>Amostra</h3>
+              <p>Previa usando uma das turmas selecionadas.</p>
+            </div>
+          </div>
+          ${renderGuidedRecurrenceMessageSample()}
+        </article>
+      </div>
+    `;
+  }
+  return `
+    <div class="review-grid">
+      <article class="card review-card">
+        <div class="card-header compact-header">
+          <div>
+            <h3>3. Relatorio de impacto</h3>
+            <p>Resumo final antes da revisao que cria os avisos no Canvas.</p>
+          </div>
+        </div>
+        <div class="summary-grid">${renderRecurrenceReviewSummary(state.recurrence.preview, false)}</div>
+        ${renderRecurrenceReviewTargets(payload)}
+      </article>
+      <article class="card review-card">
+        <div class="card-header compact-header">
+          <div>
+            <h3>Agenda prevista</h3>
+            <p>Primeiras ocorrencias calculadas para a recorrencia.</p>
+          </div>
+        </div>
+        <div class="compact-list">${renderRecurrenceReviewSchedule(state.recurrence.preview)}</div>
+      </article>
+    </div>
+  `;
+}
+
+function renderGuidedEngagementBody(step) {
+  const data = state.engagement.preview || {};
+  const request = buildEngagementRequestBody();
+  if (step === 0) {
+    return `
+      <div class="review-grid">
+        <article class="card review-card">
+          <div class="card-header compact-header">
+            <div>
+              <h3>1. Destino</h3>
+              <p>Escolha grupos ou cursos antes da busca.</p>
+            </div>
+          </div>
+          ${renderGuidedTargetSummary("engagement")}
+        </article>
+        <article class="card review-card">
+          <div class="card-header compact-header">
+            <div>
+              <h3>Regra simples</h3>
+              <p>A regra principal fica aqui; os filtros avancados sao opcionais.</p>
+            </div>
+          </div>
+          ${renderGuidedEngagementRules()}
+        </article>
+      </div>
+    `;
+  }
+  if (step === 1) {
+    return `
+      <div class="review-grid">
+        <article class="card review-card">
+          <div class="card-header compact-header">
+            <div>
+              <h3>2. Relatorio de alunos</h3>
+              <p>Confira quantos alunos e cursos entraram no filtro.</p>
+            </div>
+          </div>
+          ${renderEngagementPreviewReportActions(data.report_job, { compact: true })}
+          <div class="summary-grid">${renderReviewSummary("engagement", { ...data, request })}</div>
+          ${renderReviewTargets("engagement", data)}
+        </article>
+        <article class="card review-card">
+          <div class="card-header compact-header">
+            <div>
+              <h3>Leitura rapida</h3>
+              <p>O envio ainda nao aconteceu; esta etapa e so conferencia.</p>
+            </div>
+          </div>
+          ${renderGuidedEngagementNotices(data)}
+        </article>
+      </div>
+    `;
+  }
+  return `
+    <div class="review-grid">
+      <article class="card review-card">
+        <div class="card-header compact-header">
+          <div>
+            <h3>3. Mensagem</h3>
+            <p>Confira assunto, corpo, regra aplicada e modo teste.</p>
+          </div>
+        </div>
+        ${renderReviewMessage("engagement", { ...data, request })}
+      </article>
+      <article class="card review-card">
+        <div class="card-header compact-header">
+          <div>
+            <h3>Resumo antes da revisao final</h3>
+            <p>Depois daqui o painel abre o modal de confirmacao do envio.</p>
+          </div>
+        </div>
+        <div class="summary-grid">${renderReviewSummary("engagement", { ...data, request })}</div>
+      </article>
+    </div>
+  `;
+}
+
+function renderGuidedTargetSummary(kind) {
+  const target = state[kind];
+  const groups = target.mode === "groups" ? selectedGroups(kind) : [];
+  const courses = target.mode === "courses"
+    ? selectedCourses(kind)
+    : selectedGroups(kind).flatMap((group) => group.courses || []);
+  const uniqueCourses = unique(courses.map((course) => course.course_ref));
+  const modeLabel = target.mode === "courses" ? "Cursos especificos" : "Grupos salvos";
+  return `
+    <div class="summary-grid">
+      ${metricCard("Modo", modeLabel)}
+      ${metricCard("Grupos", target.mode === "groups" ? (target.selectAllGroups ? "Todos" : groups.length) : "-")}
+      ${metricCard("Turmas", uniqueCourses.length)}
+    </div>
+    ${groups.length ? `<div class="chips">${groups.slice(0, 8).map((group) => `<span class="chip">${escapeHtml(group.name)}</span>`).join("")}</div>` : ""}
+    ${courses.length ? `<div class="chips">${unique(courses.map((course) => courseLabel(course))).slice(0, 12).map((label) => `<span class="chip">${escapeHtml(label)}</span>`).join("")}</div>` : `<div class="empty-state">Nenhuma turma selecionada.</div>`}
+  `;
+}
+
+function renderGuidedRecurrenceMessageSample() {
+  const previewCourse = firstTargetCourse("recurrence");
+  if (!previewCourse) {
+    return `<div class="empty-state">Selecione as turmas para gerar a amostra.</div>`;
+  }
+  const renderedTitle = renderCourseTemplate($("#recurrenceTitle").value.trim() || "Titulo da recorrencia", previewCourse);
+  const renderedBody = renderCourseTemplate($("#recurrenceMessage").value.trim() || "<p></p>", previewCourse);
+  return `
+    <div class="message-block">
+      <strong>${escapeHtml(renderedTitle)}</strong>
+      <div class="compact-meta">Amostra com ${escapeHtml(courseLabel(previewCourse))}</div>
+    </div>
+    <div class="message-block message-html">${renderedBody || "<p></p>"}</div>
+  `;
+}
+
+function renderGuidedEngagementRules() {
+  const modes = selectedEngagementCriteriaModes();
+  const labels = modes.map(formatCriteriaMode);
+  const detail = selectedEngagementHasActivity()
+    ? "Busca automatica de quizzes e atividades avaliativas publicadas"
+    : "Leitura de acesso e minutos no curso";
+  return `
+    <div class="summary-grid">
+      ${metricCard("Filtros", labels.length ? labels.join(" + ") : "Nenhum")}
+      ${metricCard("Busca", detail)}
+      ${metricCard("Minutos", modes.includes("low_total_activity") ? `${$("#engagementMaxActivityMinutes").value || 10} min` : "-")}
+    </div>
+    <div class="chips">
+      <span class="chip">${escapeHtml("Comunicado 1: inatividade")}</span>
+      <span class="chip dim">${escapeHtml("Comunicado 2: atividade objetiva/integr.")}</span>
+    </div>
+  `;
+}
+
+function renderGuidedEngagementNotices(data) {
+  const summary = data?.summary || {};
+  const notices = [
+    summary.analytics_unavailable_courses ? `${summary.analytics_unavailable_courses} curso(s) sem analytics para confirmar quem nunca entrou.` : "",
+    summary.enrollment_activity_unavailable_courses ? `${summary.enrollment_activity_unavailable_courses} curso(s) sem minutos de atividade disponiveis.` : "",
+    summary.activity_unavailable_courses ? `${summary.activity_unavailable_courses} curso(s) sem quizzes/atividades avaliativas disponiveis para leitura.` : "",
+  ].filter(Boolean);
+  if (!notices.length) {
+    return `<div class="empty-state">Sem alertas de cobertura no relatorio carregado.</div>`;
+  }
+  return `<div class="chips">${notices.map((notice) => `<span class="chip dim">${escapeHtml(notice)}</span>`).join("")}</div>`;
+}
+
+function renderEngagementPreviewReportActions(previewJob, { compact = false } = {}) {
+  if (!previewJob?.id) return "";
+  const className = compact ? "button-row compact-row" : "button-row";
+  return `
+    <div class="${className}">
+      <a class="btn btn-secondary" href="/api/history/${escapeHtml(previewJob.id)}/csv">Baixar CSV da previa</a>
+      <button class="btn btn-secondary" type="button" data-action="open-report" data-job-id="${escapeHtml(previewJob.id)}">Abrir previa em Relatorios</button>
+    </div>
+  `;
+}
+
 function renderRecurrenceReviewSummary(preview, editing) {
   const summary = preview?.summary || {};
   const cards = [
@@ -1938,10 +2648,14 @@ function renderReviewSummary(kind, data) {
     cards = [
       metricCard("Turmas", (data.courses || []).length),
       metricCard("Alunos analisados", summary.total_students_found || 0),
-      metricCard("Alvos", summary.total_matched_students || 0),
-      metricCard("Sem acesso", summary.total_never_accessed_matches || 0),
-      metricCard("Pendencias", summary.total_incomplete_resources_matches || 0),
-      metricCard("Criterio", formatCriteriaMode(request.criteria_mode || "")),
+      metricCard("Alunos alvo", summary.total_unique_students_matched || summary.total_matched_students || 0),
+      metricCard("Comunicados", summary.total_target_messages || summary.total_matched_students || 0),
+      metricCard("Inatividade", summary.total_inactivity_messages || 0),
+      metricCard("Pendencias", summary.total_activity_messages || 0),
+      metricCard("Nunca entrou", summary.total_never_accessed_matches || 0),
+      metricCard("Poucos minutos", summary.total_low_activity_matches || 0),
+      metricCard("Ativ. objetiva", summary.total_missing_quiz_matches || 0),
+      metricCard("Ativ. integradora", summary.total_missing_assignment_matches || 0),
     ];
   }
   return cards.join("");
@@ -1990,9 +2704,12 @@ function renderReviewTargets(kind, data) {
         <div class="history-actions"><span class="chip">${escapeHtml(String(course.matched_students || 0))} alvo(s)</span></div>
       </div>
       <div class="review-target-meta">
-        <span>Sem acesso: ${escapeHtml(String(course.never_accessed_matches || 0))}</span>
-        <span>Pendentes: ${escapeHtml(String(course.incomplete_resources_matches || 0))}</span>
-        <span>Sem atividade: ${escapeHtml(String(course.inactive_days_matches || 0))}</span>
+        <span>Nunca entrou: ${escapeHtml(String(course.never_accessed_matches || 0))}</span>
+        <span>Poucos minutos: ${escapeHtml(String(course.low_activity_matches || 0))}</span>
+        <span>Ativ. objetiva: ${escapeHtml(String(course.missing_quiz_matches || 0))}</span>
+        <span>Ativ. integradora: ${escapeHtml(String(course.missing_assignment_matches || 0))}</span>
+        <span>Atividades: ${escapeHtml(String(course.activity_count || 0))}</span>
+        <span>Comunicados: ${escapeHtml(String(course.target_messages || course.matched_students || 0))}</span>
       </div>
     </div>
   `).join("") + renderReviewRecipientsSample(data.items || []);
@@ -2009,7 +2726,7 @@ function renderReviewRecipientsSample(items) {
           <div class="compact-meta">${escapeHtml(String(sample.length))} exibido(s)</div>
         </div>
       </div>
-      <div class="chips">${sample.map((item) => `<span class="chip">${escapeHtml(item.student_name || item.name || `Usuario ${item.user_id || "-"}`)}</span>`).join("")}</div>
+      <div class="chips">${sample.map((item) => `<span class="chip">${escapeHtml(item.student_name || item.name || `Usuario ${item.user_id || "-"}`)}${item.message_kind_label ? ` | ${escapeHtml(item.message_kind_label)}` : ""}</span>`).join("")}</div>
     </div>
   `;
 }
@@ -2037,6 +2754,14 @@ function invalidateRecurrencePreview(kind) {
     renderRecurrenceEditPreview(null);
     renderRecurrenceEditInfoPanel();
   }
+}
+
+function invalidateEngagementPreview() {
+  state.engagement.preview = null;
+  renderTargetSummary("engagement");
+  renderEngagementPreview(null);
+  updateEngagementMessagePreview();
+  persistUiState();
 }
 
 function renderRecurrencePreviewState() {
@@ -2117,29 +2842,23 @@ function renderReviewMessage(kind, data) {
   }
 
   if (kind === "engagement") {
-    const sampleRecipient = Array.isArray(data?.items) && data.items.length
-      ? data.items[0]
-      : firstEngagementPreviewRecipient();
-    const sampleCourse = sampleRecipient
-      ? findCourseByRef(sampleRecipient.course_ref || sampleRecipient.course_id)
-      : firstTargetCourse("engagement");
-    const previewSubject = renderCourseTemplate(request.subject || "-", sampleCourse, {
-      student_name: sampleRecipient?.student_name || "Nome do aluno",
-    });
-    const previewBody = renderCourseTemplate(request.message || "", sampleCourse, {
-      student_name: sampleRecipient?.student_name || "Nome do aluno",
-    });
+    const inactivityRecipient = firstEngagementPreviewRecipientByKind("inactivity") || firstEngagementPreviewRecipient();
+    const activityRecipient = firstEngagementPreviewRecipientByKind("missing_activity") || firstEngagementPreviewRecipient();
+    const blocks = [];
+    if (request.inactivity_subject || request.inactivity_message) {
+      blocks.push(renderEngagementReviewMessageBlock("Inatividade", request.inactivity_subject, request.inactivity_message, inactivityRecipient));
+    }
+    if (request.activity_subject || request.activity_message) {
+      blocks.push(renderEngagementReviewMessageBlock("Atividade objetiva/integr. pendente", request.activity_subject, request.activity_message, activityRecipient));
+    }
     return `
+      ${blocks.join("") || `<div class="empty-state">Nenhuma mensagem carregada.</div>`}
       <div class="message-block">
-        <strong>${escapeHtml(previewSubject)}</strong>
         <div class="review-target-meta">
-          <span>Criterio: ${escapeHtml(formatCriteriaMode(request.criteria_mode || ""))}</span>
+          <span>Filtros: ${escapeHtml(normalizeEngagementCriteriaModes(request.criteria_modes || request.criteria_mode).map(formatCriteriaMode).join(" + "))}</span>
           <span>Modo teste: ${request.dry_run ? "Sim" : "Nao"}</span>
-          <span>${sampleCourse ? `Turma: ${escapeHtml(sampleCourse.course_name || sampleCourse.course_ref || "-")}` : "Sem turma para amostra"}</span>
-          <span>Aluno: ${escapeHtml(sampleRecipient?.student_name || "Nome do aluno")}</span>
         </div>
       </div>
-      <div class="message-block"><pre>${escapeHtml(previewBody)}</pre></div>
     `;
   }
 
@@ -2162,9 +2881,12 @@ function formatPublishMode(mode) {
 }
 
 function formatCriteriaMode(mode) {
-  if (mode === "never_accessed") return "Sem acesso nenhum";
-  if (mode === "incomplete_resources") return "Com recursos pendentes";
-  if (mode === "never_accessed_or_incomplete_resources") return "Sem acesso ou pendencias";
+  if (mode === "never_accessed") return "Nunca entrou";
+  if (mode === "low_total_activity") return "Poucos minutos";
+  if (mode === "missing_assignment") return "Nao realizou a atividade integradora";
+  if (mode === "missing_quiz") return "Nao realizou a atividade objetiva";
+  if (["missing_activity"].includes(mode)) return "Nao realizou a atividade integradora";
+  if (["incomplete_resources", "never_accessed_or_incomplete_resources"].includes(mode)) return "Nunca entrou";
   return mode || "-";
 }
 
@@ -2338,6 +3060,8 @@ function renderPicker(pickerId, items, selectedIds, options = {}) {
   if (!target) return;
   const previousScrollTop = options.preserveScroll ? getPickerScrollTop(pickerId) : null;
   const searchText = state.pickerSearch[pickerId] || "";
+  const displaySearchText = options.searchValue ?? state.pickerSearchDraft[pickerId] ?? searchText;
+  const shouldRestoreSearchFocus = Boolean(options.preserveFocus && document.activeElement?.matches?.(`[data-picker-search="${pickerId}"]`));
   const selectedSet = new Set(selectedIds);
   const filtered = sortPickerItems(
     items.filter((item) => item.search.includes(searchText)),
@@ -2347,7 +3071,7 @@ function renderPicker(pickerId, items, selectedIds, options = {}) {
   target.innerHTML = `
     <div class="picker-root" data-picker-root="${pickerId}">
       <div class="picker-toolbar">
-        <input type="text" data-picker-search="${pickerId}" placeholder="Buscar..." value="${escapeHtml(searchText)}">
+        <input type="text" data-picker-search="${pickerId}" placeholder="Buscar..." value="${escapeHtml(displaySearchText)}">
         <div class="picker-selected">
           ${selectedIds.length ? selectedIds.map((value) => {
             const item = items.find((entry) => entry.id === value);
@@ -2370,6 +3094,9 @@ function renderPicker(pickerId, items, selectedIds, options = {}) {
   `;
   if (previousScrollTop !== null) {
     restorePickerScrollTop(pickerId, previousScrollTop);
+  }
+  if (shouldRestoreSearchFocus) {
+    restorePickerSearchFocus(pickerId, String(displaySearchText).length);
   }
 }
 
@@ -2402,6 +3129,16 @@ function restorePickerScrollTop(pickerId, scrollTop) {
     if (options) {
       options.scrollTop = scrollTop;
     }
+  });
+}
+
+function restorePickerSearchFocus(pickerId, caretPosition) {
+  window.requestAnimationFrame(() => {
+    const search = document.querySelector(`[data-picker-search="${pickerId}"]`);
+    if (!search) return;
+    search.focus();
+    const position = Number(caretPosition || search.value.length);
+    search.setSelectionRange(position, position);
   });
 }
 
@@ -2583,31 +3320,59 @@ function groupPickerItems() {
     id: group.id,
     label: group.name,
     shortLabel: group.name,
-    meta: `${group.course_refs.length} curso(s) | ${(group.courses || []).map((course) => course.course_name || course.course_ref).slice(0, 2).join(" | ")}`,
-    search: `${group.name} ${(group.courses || []).map((course) => `${course.course_ref} ${course.course_name || ""}`).join(" ")}`.toLowerCase(),
+    meta: `${group.course_refs.length} curso(s) | ${(group.courses || []).map((course) => courseLabel(course)).slice(0, 2).join(" | ")}`,
+    search: `${group.name} ${(group.courses || []).map((course) => courseSearchText(course)).join(" ")}`.toLowerCase(),
   }));
 }
 
 function coursePickerItems() {
   return state.registeredCourses.map((course) => ({
     id: course.course_ref,
-    label: course.course_name || `Curso ${course.course_ref}`,
-    shortLabel: course.course_name || `Curso ${course.course_ref}`,
-    meta: `${course.term_name ? `${course.term_name}` : "Curso cadastrado"}`,
-    search: `${course.course_ref} ${course.course_name || ""} ${course.course_code || ""} ${course.term_name || ""}`.toLowerCase(),
+    label: courseLabel(course),
+    shortLabel: courseLabel(course),
+    meta: `${course.term_name ? `${course.term_name}` : "Curso cadastrado"} | ${course.course_ref}`,
+    search: courseSearchText(course).toLowerCase(),
   }));
 }
 
 function catalogCoursePickerItems() {
   return state.courseCatalog.map((course) => ({
     id: String(course.course_ref || course.id),
-    label: course.name || `Curso ${course.course_ref || course.id}`,
-    shortLabel: course.name || `Curso ${course.course_ref || course.id}`,
-    meta: `${course.term_name ? `${course.term_name}` : "Curso do Canvas"}`,
-    search: `${course.course_ref || course.id} ${course.name || ""} ${course.course_code || ""} ${course.term_name || ""}`.toLowerCase(),
+    label: courseLabel(course),
+    shortLabel: courseLabel(course),
+    meta: `${course.term_name ? `${course.term_name}` : "Curso do Canvas"} | ${course.course_ref || course.id}`,
+    search: courseSearchText(course).toLowerCase(),
     disabled: Boolean(course.already_registered),
     badge: course.already_registered ? "ja cadastrado" : "",
   }));
+}
+
+function shortCourseCode(course) {
+  const rawCode = String(course?.course_code_short || course?.course_code || "").trim();
+  if (!rawCode) return "";
+  return (rawCode.split("@", 1)[0] || rawCode).trim();
+}
+
+function courseName(course) {
+  return course?.course_name || course?.name || `Curso ${course?.course_ref || course?.id || "-"}`;
+}
+
+function courseLabel(course) {
+  const code = shortCourseCode(course);
+  const name = courseName(course);
+  if (!code) return name;
+  return name.toLowerCase().startsWith(`${code.toLowerCase()} `) ? name : `${code} | ${name}`;
+}
+
+function courseSearchText(course) {
+  return [
+    course?.course_ref || course?.id || "",
+    course?.course_name || course?.name || "",
+    course?.course_code || "",
+    course?.course_code_short || "",
+    shortCourseCode(course),
+    course?.term_name || "",
+  ].join(" ");
 }
 
 function renderTargetSummary(kind) {
@@ -2642,7 +3407,8 @@ function renderTargetSummary(kind) {
       <div class="summary-card"><span>Turmas selecionadas</span><strong>${escapeHtml(String(uniqueCourseRefs.length))}</strong></div>
       <div class="summary-card"><span>Preview carregado</span><strong>${previewSummary ? "Sim" : "Nao"}</strong></div>
       <div class="summary-card"><span>Alunos analisados</span><strong>${escapeHtml(String(previewSummary?.total_students_found || 0))}</strong></div>
-      <div class="summary-card"><span>Alunos alvo</span><strong>${escapeHtml(String(previewSummary?.total_matched_students || 0))}</strong></div>
+      <div class="summary-card"><span>Alunos alvo</span><strong>${escapeHtml(String(previewSummary?.total_unique_students_matched || previewSummary?.total_matched_students || 0))}</strong></div>
+      <div class="summary-card"><span>Comunicados</span><strong>${escapeHtml(String(previewSummary?.total_target_messages || previewSummary?.total_matched_students || 0))}</strong></div>
     `;
     return;
   }
@@ -2650,7 +3416,7 @@ function renderTargetSummary(kind) {
     <div class="summary-card"><span>Modo</span><strong>${modeLabelMap[target.mode] || "-"}</strong></div>
     <div class="summary-card"><span>Grupos</span><strong>${target.mode === "groups" ? (target.selectAllGroups ? "Todos" : String(selectedGroups(kind).length)) : "-"}</strong></div>
     <div class="summary-card"><span>Cursos</span><strong>${escapeHtml(String(uniqueCourseRefs.length))}</strong></div>
-    <div class="summary-card"><span>Em foco</span><strong>${escapeHtml(courses.slice(0, 2).map((course) => course.course_name || course.course_ref).join(" | ") || "Nenhuma")}${courses.length > 2 ? "..." : ""}</strong></div>
+    <div class="summary-card"><span>Em foco</span><strong>${escapeHtml(courses.slice(0, 2).map((course) => courseLabel(course)).join(" | ") || "Nenhuma")}${courses.length > 2 ? "..." : ""}</strong></div>
   `;
 }
 
@@ -2684,7 +3450,7 @@ function renderMessageInfoPanel() {
       <span class="chip">${escapeHtml(request.dedupe ? "Sem duplicidade entre turmas" : "Duplicidade permitida")}</span>
       <span class="chip">${escapeHtml($("#messageAttachment").files?.[0]?.name || "Sem anexo")}</span>
       ${messageUsesStudentName(request) ? `<span class="chip">Personalizacao por aluno ativa</span>` : ""}
-      ${unique(courses.map((course) => `${course.course_name || course.course_ref}`)).slice(0, 10).map((label) => `<span class="chip">${escapeHtml(label)}</span>`).join("")}
+      ${unique(courses.map((course) => courseLabel(course))).slice(0, 10).map((label) => `<span class="chip">${escapeHtml(label)}</span>`).join("")}
     </div>
   ` : "Defina o destino para ver aqui o resumo operacional do envio.";
 }
@@ -2706,7 +3472,7 @@ function renderAnnouncementInfoPanel() {
     <div class="chips">
       <span class="chip">${escapeHtml($("#announcementAttachment").files?.[0]?.name || "Sem anexo")}</span>
       ${request.publish_mode === "schedule" && request.schedule_at_local ? `<span class="chip">Agenda para ${escapeHtml(formatLocalDateTimeLabel(request.schedule_at_local))}</span>` : ""}
-      ${unique(courses.map((course) => `${course.course_name || course.course_ref}`)).slice(0, 8).map((label) => `<span class="chip">${escapeHtml(label)}</span>`).join("")}
+      ${unique(courses.map((course) => courseLabel(course))).slice(0, 8).map((label) => `<span class="chip">${escapeHtml(label)}</span>`).join("")}
     </div>
   ` : "Defina o destino para ver o resumo operacional do comunicado.";
 }
@@ -2774,6 +3540,96 @@ function clearMessagePreviewRecipients(options = {}) {
   }
 }
 
+function percentLabel(value) {
+  const numeric = Number(value || 0);
+  return `${numeric.toFixed(numeric % 1 ? 1 : 0)}%`;
+}
+
+function booleanPill(value, label) {
+  return `<span class="status-chip ${value ? "status-warning" : "status-success"}">${escapeHtml(label)}</span>`;
+}
+
+function engagementAnalysisStudentColumns() {
+  return [
+    { label: "Aluno", format: (row) => `${escapeHtml(row.student_name || "-")}<div class="subtle mono">${escapeHtml(String(row.user_id || "-"))}</div>` },
+    { label: "Turmas", format: (row) => `${escapeHtml(String(row.course_count || 0))}<div class="subtle">${escapeHtml(row.courses_label || "-")}</div>` },
+    { label: "Status", format: (row) => row.clear ? `<span class="status-chip status-success">Fez tudo</span>` : `<span class="status-chip status-warning">Com alerta</span>` },
+    { label: "Inatividade", format: (row) => [row.never_accessed ? "Nunca entrou" : "", row.low_activity ? "Poucos min" : ""].filter(Boolean).join(" | ") || "-" },
+    { label: "Ativ. objetiva", format: (row) => row.missing_quiz ? escapeHtml((row.missing_quiz_names || []).join(", ") || "Pendente") : "-" },
+    { label: "Ativ. integradora", format: (row) => row.missing_assignment ? escapeHtml((row.missing_assignment_names || []).join(", ") || "Pendente") : "-" },
+    { label: "Comunicados", format: (row) => escapeHtml((row.message_kind_labels || []).join(" + ") || "-") },
+  ];
+}
+
+function engagementAnalysisCourseColumns() {
+  return [
+    { label: "Turma", format: (row) => escapeHtml(row.course_name || "-") },
+    { label: "Alunos", format: (row) => escapeHtml(String(row.students_found || 0)) },
+    { label: "Fez tudo", format: (row) => `${escapeHtml(String(row.students_clear || 0))}<div class="subtle">${percentLabel(row.clear_pct)}</div>` },
+    { label: "Nunca entrou", format: (row) => `${escapeHtml(String(row.never_accessed_students || 0))}<div class="subtle">${percentLabel(row.never_accessed_pct)}</div>` },
+    { label: "Poucos min", format: (row) => `${escapeHtml(String(row.low_activity_students || 0))}<div class="subtle">${percentLabel(row.low_activity_pct)}</div>` },
+    { label: "Ativ. objetiva", format: (row) => `${escapeHtml(String(row.missing_quiz_students || 0))}<div class="subtle">${row.objective_done_pct == null ? "-" : percentLabel(row.objective_done_pct)}</div>` },
+    { label: "Ativ. integradora", format: (row) => `${escapeHtml(String(row.missing_assignment_students || 0))}<div class="subtle">${row.integrated_done_pct == null ? "-" : percentLabel(row.integrated_done_pct)}</div>` },
+  ];
+}
+
+function renderEngagementAnalysis(analysis, { showLoadButton = false, reportId = "" } = {}) {
+  if (!analysis) return "";
+  const summary = analysis.summary || {};
+  const distribution = Array.isArray(analysis.issue_distribution) ? analysis.issue_distribution : [];
+  const students = Array.isArray(analysis.student_rows) ? analysis.student_rows : [];
+  const courses = Array.isArray(analysis.course_rows) ? analysis.course_rows : [];
+  const loadButton = showLoadButton && reportId
+    ? `<button class="btn btn-secondary" type="button" data-action="load-engagement-report" data-job-id="${escapeHtml(reportId)}">Carregar esta analise em Inativos</button>`
+    : "";
+  return `
+    <div class="summary-grid">
+      <div class="summary-card"><span>Alunos unicos</span><strong>${escapeHtml(String(summary.total_unique_students || 0))}</strong></div>
+      <div class="summary-card"><span>Fez tudo</span><strong>${escapeHtml(String(summary.clear_unique_students || 0))}<div class="subtle">${escapeHtml(percentLabel(summary.clear_pct || 0))}</div></strong></div>
+      <div class="summary-card"><span>Com alerta</span><strong>${escapeHtml(String(summary.targeted_unique_students || 0))}<div class="subtle">${escapeHtml(percentLabel(summary.targeted_pct || 0))}</div></strong></div>
+      <div class="summary-card"><span>Nunca entrou</span><strong>${escapeHtml(String(summary.never_accessed_unique_students || 0))}<div class="subtle">${escapeHtml(percentLabel(summary.never_accessed_pct || 0))}</div></strong></div>
+      <div class="summary-card"><span>Menos de ${escapeHtml(String(summary.minutes_threshold || 0))} min</span><strong>${escapeHtml(String(summary.low_activity_unique_students || 0))}<div class="subtle">${escapeHtml(percentLabel(summary.low_activity_pct || 0))}</div></strong></div>
+      <div class="summary-card"><span>Ativ. objetiva</span><strong>${escapeHtml(String(summary.missing_quiz_unique_students || 0))}<div class="subtle">${escapeHtml(percentLabel(summary.missing_quiz_pct || 0))}</div></strong></div>
+      <div class="summary-card"><span>Ativ. integradora</span><strong>${escapeHtml(String(summary.missing_assignment_unique_students || 0))}<div class="subtle">${escapeHtml(percentLabel(summary.missing_assignment_pct || 0))}</div></strong></div>
+    </div>
+    ${loadButton ? `<div class="button-row">${loadButton}</div>` : ""}
+    ${distribution.length ? `
+      <div class="engagement-chart-grid">
+        ${distribution.map((item) => `
+          <article class="engagement-chart-card">
+            <div class="engagement-chart-head">
+              <strong>${escapeHtml(item.label || "-")}</strong>
+              <span>${escapeHtml(String(item.count || 0))} aluno(s)</span>
+            </div>
+            <div class="engagement-bar-track" aria-hidden="true">
+              <div class="engagement-bar-fill" style="width:${Math.max(0, Math.min(100, Number(item.pct || 0)))}%"></div>
+            </div>
+            <div class="compact-meta">${escapeHtml(percentLabel(item.pct || 0))}</div>
+          </article>
+        `).join("")}
+      </div>
+    ` : ""}
+    <details class="report-section" open>
+      <summary>
+        <span>Resumo por turma</span>
+        <span class="report-section-meta">${escapeHtml(String(courses.length))} turma(s)</span>
+      </summary>
+      <div class="report-section-body">
+        ${courses.length ? renderTable(engagementAnalysisCourseColumns(), courses) : `<div class="empty-state">Sem resumo por turma.</div>`}
+      </div>
+    </details>
+    <details class="report-section" open>
+      <summary>
+        <span>Relatorio sem duplicata</span>
+        <span class="report-section-meta">${escapeHtml(String(students.length))} aluno(s)</span>
+      </summary>
+      <div class="report-section-body">
+        ${students.length ? renderTable(engagementAnalysisStudentColumns(), students) : `<div class="empty-state">Sem alunos nesta analise.</div>`}
+      </div>
+    </details>
+  `;
+}
+
 function renderEngagementPreview(data) {
   const target = $("#engagementPreviewCard");
   if (!target) return;
@@ -2788,43 +3644,54 @@ function renderEngagementPreview(data) {
   target.classList.remove("empty-state");
   const summary = data.summary || {};
   const courses = Array.isArray(data.courses) ? data.courses : [];
-  const items = Array.isArray(data.items) ? data.items : [];
+  const analysis = data.analysis || null;
+  const previewJob = data.report_job || null;
   const notices = [];
-  if (summary.courses_without_module_requirements) {
-    notices.push(`${summary.courses_without_module_requirements} curso(s) sem requisitos de modulos configurados.`);
-  }
   if (summary.analytics_unavailable_courses) {
-    notices.push(`${summary.analytics_unavailable_courses} curso(s) sem analytics disponivel.`);
+    notices.push(`${summary.analytics_unavailable_courses} curso(s) sem analytics para confirmar quem nunca entrou.`);
   }
-  if (summary.progress_unavailable_courses) {
-    notices.push(`${summary.progress_unavailable_courses} curso(s) sem progresso de modulos disponivel.`);
+  if (summary.enrollment_activity_unavailable_courses) {
+    notices.push(`${summary.enrollment_activity_unavailable_courses} curso(s) sem minutos de atividade disponiveis.`);
+  }
+  if (summary.activity_unavailable_courses) {
+    notices.push(`${summary.activity_unavailable_courses} curso(s) sem quizzes/atividades avaliativas disponiveis para leitura.`);
   }
 
   target.innerHTML = `
     <div class="summary-grid">
       <div class="summary-card"><span>Cursos</span><strong>${escapeHtml(String(summary.total_courses || 0))}</strong></div>
       <div class="summary-card"><span>Alunos analisados</span><strong>${escapeHtml(String(summary.total_students_found || 0))}</strong></div>
-      <div class="summary-card"><span>Alunos que receberao</span><strong>${escapeHtml(String(summary.total_matched_students || 0))}</strong></div>
-      <div class="summary-card"><span>Sem acesso nenhum</span><strong>${escapeHtml(String(summary.total_never_accessed_matches || 0))}</strong></div>
-      <div class="summary-card"><span>Recursos pendentes</span><strong>${escapeHtml(String(summary.total_incomplete_resources_matches || 0))}</strong></div>
-      <div class="summary-card"><span>Sem atividade</span><strong>${escapeHtml(String(summary.total_inactive_days_matches || 0))}</strong></div>
-      <div class="summary-card"><span>Baixa atividade</span><strong>${escapeHtml(String(summary.total_low_activity_matches || 0))}</strong></div>
-      <div class="summary-card"><span>Turma foco</span><strong>${escapeHtml(summary.top_priority_course_name || "-")}</strong></div>
-      <div class="summary-card"><span>Criterio</span><strong>${escapeHtml(formatEngagementCriteria(summary.criteria_mode || $("#engagementCriteriaMode").value))}</strong></div>
+      <div class="summary-card"><span>Alunos alvo</span><strong>${escapeHtml(String(summary.total_unique_students_matched || summary.total_matched_students || 0))}</strong></div>
+      <div class="summary-card"><span>Comunicados</span><strong>${escapeHtml(String(summary.total_target_messages || summary.total_matched_students || 0))}</strong></div>
+      <div class="summary-card"><span>Inatividade</span><strong>${escapeHtml(String(summary.total_inactivity_messages || 0))}</strong></div>
+      <div class="summary-card"><span>Pendencias</span><strong>${escapeHtml(String(summary.total_activity_messages || 0))}</strong></div>
+      <div class="summary-card"><span>Nunca entrou</span><strong>${escapeHtml(String(summary.total_never_accessed_matches || 0))}</strong></div>
+      <div class="summary-card"><span>Poucos minutos</span><strong>${escapeHtml(String(summary.total_low_activity_matches || 0))}</strong></div>
+      <div class="summary-card"><span>Ativ. objetiva</span><strong>${escapeHtml(String(summary.total_missing_quiz_matches || 0))}</strong></div>
+      <div class="summary-card"><span>Ativ. integradora</span><strong>${escapeHtml(String(summary.total_missing_assignment_matches || 0))}</strong></div>
     </div>
+    ${renderEngagementPreviewReportActions(previewJob)}
     ${notices.length ? `<div class="chips">${notices.map((item) => `<span class="chip dim">${escapeHtml(item)}</span>`).join("")}</div>` : ""}
     <details class="table-guide" open>
       <summary>Como ler estes dados</summary>
       <div class="table-guide-grid">
-        <div class="table-guide-item"><strong>Sem acesso</strong><span>Canvas marcou page_views = 0 e participations = 0 para o aluno.</span></div>
-        <div class="table-guide-item"><strong>Pendentes</strong><span>O aluno ainda nao concluiu requisitos de modulos configurados no curso.</span></div>
-        <div class="table-guide-item"><strong>Sem atividade</strong><span>O last_activity_at ficou alem do limite configurado na busca.</span></div>
-        <div class="table-guide-item"><strong>Baixa atividade</strong><span>O total_activity_time ficou abaixo do teto em minutos informado.</span></div>
+        <div class="table-guide-item"><strong>Inatividade</strong><span>O aluno nunca entrou ou ficou abaixo do limite de minutos escolhido.</span></div>
+        <div class="table-guide-item"><strong>Atividade objetiva</strong><span>O aluno nao realizou pelo menos uma atividade objetiva publicada da disciplina.</span></div>
+        <div class="table-guide-item"><strong>Atividade integradora</strong><span>O aluno nao realizou pelo menos uma atividade integradora publicada da disciplina.</span></div>
+        <div class="table-guide-item"><strong>Comunicado</strong><span>O mesmo aluno pode aparecer duas vezes se receber os dois tipos de mensagem.</span></div>
         <div class="table-guide-item"><strong>Recebimento</strong><span>A mensagem vai pela Inbox do Canvas; email depende das notificacoes do aluno.</span></div>
       </div>
     </details>
-    ${courses.length ? renderTable(engagementCourseColumns(), courses) : `<div class="empty-state">Nenhum curso entrou no preview.</div>`}
-    ${items.length ? renderTable(engagementPreviewColumns(), items) : `<div class="empty-state">Nenhum aluno corresponde ao criterio selecionado.</div>`}
+    ${renderEngagementAnalysis(analysis)}
+    <details class="report-section">
+      <summary>
+        <span>Conferencia por turma</span>
+        <span class="report-section-meta">${escapeHtml(String(courses.length))} turma(s)</span>
+      </summary>
+      <div class="report-section-body">
+        ${courses.length ? renderTable(engagementCourseColumns(), courses) : `<div class="empty-state">Nenhum curso entrou no preview.</div>`}
+      </div>
+    </details>
   `;
   syncCollapsibleCards();
 }
@@ -2835,13 +3702,13 @@ function engagementCourseColumns() {
     { label: "Prioridade", format: (row) => priorityPill(row.priority_level, row.urgency_score) },
     { label: "Alunos", format: (row) => escapeHtml(String(row.students_found || 0)) },
     { label: "Alvo", format: (row) => escapeHtml(String(row.matched_students || 0)) },
+    { label: "Comunicados", format: (row) => escapeHtml(String(row.target_messages || row.matched_students || 0)) },
     { label: "Cobertura", format: (row) => `${escapeHtml(formatSummaryValue(row.matched_ratio || 0))}%` },
-    { label: "Sem acesso", format: (row) => escapeHtml(String(row.never_accessed_matches || 0)) },
-    { label: "Pendentes", format: (row) => escapeHtml(String(row.incomplete_resources_matches || 0)) },
-    { label: "Sem atividade", format: (row) => escapeHtml(String(row.inactive_days_matches || 0)) },
-    { label: "Baixa atividade", format: (row) => escapeHtml(String(row.low_activity_matches || 0)) },
-    { label: "Modulo", format: (row) => row.has_module_requirements ? "Sim" : "Nao" },
-    { label: "Status API", format: (row) => `${row.analytics_available ? "Analytics ok" : "Analytics indisponivel"}<div class="subtle">${row.progress_available ? "Progress ok" : "Progress indisponivel"} | ${row.enrollment_activity_available ? "Enrollments ok" : "Enrollments indisponivel"}</div>` },
+    { label: "Nunca entrou", format: (row) => escapeHtml(String(row.never_accessed_matches || 0)) },
+    { label: "Poucos min", format: (row) => escapeHtml(String(row.low_activity_matches || 0)) },
+    { label: "Ativ. objetiva", format: (row) => escapeHtml(String(row.missing_quiz_matches || 0)) },
+    { label: "Ativ. integradora", format: (row) => escapeHtml(String(row.missing_assignment_matches || 0)) },
+    { label: "Atividades", format: (row) => `${escapeHtml(String(row.activity_count || 0))}<div class="subtle">${escapeHtml(row.activity_filter_error || activityKindLabel(row.activity_kind))}</div>` },
   ];
 }
 
@@ -2849,12 +3716,19 @@ function engagementPreviewColumns() {
   return [
     { label: "Turma", format: (row) => escapeHtml(row.course_name || "-") },
     { label: "Aluno", format: (row) => `${escapeHtml(row.student_name || "-")}<div class="subtle mono">${escapeHtml(String(row.user_id || "-"))}</div>` },
+    { label: "Comunicado", format: (row) => escapeHtml(row.message_kind_label || "-") },
     { label: "Prioridade", format: (row) => priorityPill(row.priority_level, row.urgency_score) },
-    { label: "Acessos", format: (row) => `${escapeHtml(String(row.page_views || 0))} visualizacoes<div class="subtle">${escapeHtml(String(row.participations || 0))} participacoes</div>` },
-    { label: "Atividade", format: (row) => `${escapeHtml(formatDateTime(row.last_activity_at))}<div class="subtle">${escapeHtml(String(Math.round((row.total_activity_time_seconds || 0) / 60)))} min</div>` },
-    { label: "Recursos", format: (row) => `${escapeHtml(String(row.requirement_completed_count || 0))}/${escapeHtml(String(row.requirement_count || 0))}` },
+    { label: "Atividades", format: (row) => `${escapeHtml(String(row.activity_submitted_count || 0))}/${escapeHtml(String(row.activity_count || 0))}<div class="subtle">${escapeHtml(activityKindLabel(row.activity_type))}</div>` },
+    { label: "Faltando", format: (row) => (row.missing_activity_names || []).length ? escapeHtml(row.missing_activity_names.join(", ")) : "-" },
     { label: "Motivo", format: (row) => escapeHtml(row.reasons_label || "-") },
   ];
+}
+
+function activityKindLabel(kind) {
+  if (kind === "quiz") return "atividades objetivas";
+  if (kind === "assignment") return "atividades integradoras";
+  if (kind === "mixed") return "atividades objetivas + atividades integradoras";
+  return "-";
 }
 
 const TEMPLATE_SCOPE_CONFIG = {
@@ -2897,12 +3771,17 @@ const TEMPLATE_SCOPE_CONFIG = {
   },
   engagement: {
     fields: [
-      { id: "engagementSubject", label: "Assunto" },
-      { id: "engagementMessage", label: "Mensagem" },
+      { id: "engagementSubject", label: "Assunto de inatividade" },
+      { id: "engagementMessage", label: "Mensagem de inatividade" },
+      { id: "engagementActivitySubject", label: "Assunto de atividade objetiva/integradora" },
+      { id: "engagementActivityMessage", label: "Mensagem de atividade objetiva/integradora" },
     ],
     tokens: [
       { token: "{{student_name}}", label: "Nome do aluno" },
       { token: "{{course_name}}", label: "Nome da disciplina" },
+      { token: "{{reason}}", label: "Motivo do filtro" },
+      { token: "{{missing_activities}}", label: "Atividades nao encontradas" },
+      { token: "{{activity_type}}", label: "Tipo de atividade" },
     ],
   },
 };
@@ -3032,12 +3911,8 @@ function updateTemplatePreviewsForKind(kind) {
 
 function collectEngagementCriteriaConfig() {
   return {
-    match_mode: $("#engagementMatchMode").value,
-    inactive_days: $("#engagementInactiveDays").value ? Number($("#engagementInactiveDays").value) : null,
-    max_total_activity_minutes: $("#engagementMaxActivityMinutes").value ? Number($("#engagementMaxActivityMinutes").value) : null,
-    only_with_module_requirements: $("#engagementOnlyModules").checked,
-    require_never_accessed: $("#engagementRequireNeverAccessed").checked,
-    require_incomplete_resources: $("#engagementRequireIncomplete").checked,
+    max_total_activity_minutes: Number($("#engagementMaxActivityMinutes").value || 10),
+    criteria_modes: selectedEngagementCriteriaModes(),
   };
 }
 
@@ -3096,13 +3971,19 @@ function validateAnnouncementForm() {
 }
 
 function buildEngagementRequestBody() {
+  const criteriaModes = selectedEngagementCriteriaModes();
   return {
     ...getConnectionPayload(),
     ...getTargetPayload("engagement"),
-    criteria_mode: $("#engagementCriteriaMode").value,
+    criteria_mode: criteriaModes[0] || "never_accessed",
+    criteria_modes: criteriaModes,
     criteria_config: collectEngagementCriteriaConfig(),
     subject: $("#engagementSubject").value.trim(),
     message: $("#engagementMessage").value.trim(),
+    inactivity_subject: $("#engagementSubject").value.trim(),
+    inactivity_message: $("#engagementMessage").value.trim(),
+    activity_subject: $("#engagementActivitySubject").value.trim(),
+    activity_message: $("#engagementActivityMessage").value.trim(),
     dry_run: $("#engagementDryRun").checked,
   };
 }
@@ -3129,8 +4010,25 @@ function validateMessageForm() {
   return true;
 }
 
+function validateEngagementCriteriaSelection(notify = showNotice) {
+  const modes = selectedEngagementCriteriaModes();
+  if (!modes.length) {
+    notify("Selecione pelo menos um filtro de inativos.", "error");
+    focusField("#engagementCriterionNeverAccessed");
+    return false;
+  }
+  if (modes.includes("low_total_activity") && Number($("#engagementMaxActivityMinutes").value || 0) <= 0) {
+    markInvalid("#engagementMaxActivityMinutes");
+    notify("Informe uma quantidade de minutos maior que zero.", "error");
+    focusField("#engagementMaxActivityMinutes");
+    return false;
+  }
+  return true;
+}
+
 function validateEngagementForm() {
   if (!ensureConnectionConfigured() || !ensureTargetSelection("engagement")) return false;
+  if (!validateEngagementCriteriaSelection()) return false;
   if (!state.engagement.preview) {
     showNotice("Busque primeiro a quantidade de alunos por turma antes de enviar a mensagem para inativos.", "error");
     openTab("engagement");
@@ -3142,16 +4040,28 @@ function validateEngagementForm() {
     focusField("#engagementSubject");
     return false;
   }
-  if (!$("#engagementSubject").value.trim()) {
+  if (selectedEngagementHasInactivity() && !$("#engagementSubject").value.trim()) {
     markInvalid("#engagementSubject");
     focusField("#engagementSubject");
-    showNotice("Informe o assunto da mensagem para inativos.", "error");
+    showNotice("Informe o assunto da mensagem de inatividade.", "error");
     return false;
   }
-  if (!$("#engagementMessage").value.trim()) {
+  if (selectedEngagementHasInactivity() && !$("#engagementMessage").value.trim()) {
     markInvalid("#engagementMessage");
     focusField("#engagementMessage");
-    showNotice("Informe a mensagem para os alunos inativos.", "error");
+    showNotice("Informe a mensagem de inatividade.", "error");
+    return false;
+  }
+  if (selectedEngagementHasActivity() && !$("#engagementActivitySubject").value.trim()) {
+    markInvalid("#engagementActivitySubject");
+    focusField("#engagementActivitySubject");
+    showNotice("Informe o assunto da mensagem de atividade objetiva/integradora.", "error");
+    return false;
+  }
+  if (selectedEngagementHasActivity() && !$("#engagementActivityMessage").value.trim()) {
+    markInvalid("#engagementActivityMessage");
+    focusField("#engagementActivityMessage");
+    showNotice("Informe a mensagem de atividade objetiva/integradora.", "error");
     return false;
   }
   return true;
@@ -3286,16 +4196,7 @@ async function previewRecurrence() {
   clearFieldValidation();
   try {
     if (!validateRecurrenceForm()) return;
-    const requestBody = buildRecurrenceRequestBody();
-    const response = await apiFetch("/api/announcement-recurrences/preview", {
-      method: "POST",
-      body: requestBody,
-    });
-    state.recurrence.preview = response;
-    state.recurrence.previewSignature = buildRecurrencePreviewSignature(requestBody);
-    renderTargetSummary("recurrence");
-    renderRecurrenceInfoPanel();
-    renderRecurrencePreview(response);
+    await loadRecurrencePreviewForCurrentForm();
     showNotice("Previsao da recorrencia carregada.", "success");
   } catch (error) {
     state.recurrence.preview = null;
@@ -3307,6 +4208,23 @@ async function previewRecurrence() {
   } finally {
     setBusy(button, false);
   }
+}
+
+async function loadRecurrencePreviewForCurrentForm() {
+  const requestBody = buildRecurrenceRequestBody();
+  if (recurrencePreviewIsCurrent("recurrence", requestBody)) {
+    return state.recurrence.preview;
+  }
+  const response = await apiFetch("/api/announcement-recurrences/preview", {
+    method: "POST",
+    body: requestBody,
+  });
+  state.recurrence.preview = response;
+  state.recurrence.previewSignature = buildRecurrencePreviewSignature(requestBody);
+  renderTargetSummary("recurrence");
+  renderRecurrenceInfoPanel();
+  renderRecurrencePreview(response);
+  return response;
 }
 
 async function previewRecurrenceEdit() {
@@ -3343,20 +4261,8 @@ async function previewEngagementTargets() {
   hideNotice();
   clearFieldValidation();
   try {
-    if (!ensureConnectionConfigured() || !ensureTargetSelection("engagement")) return;
-    const response = await apiFetch("/api/engagement/inactive-targets", {
-      method: "POST",
-      body: {
-        ...getConnectionPayload(),
-        ...getTargetPayload("engagement"),
-        criteria_mode: $("#engagementCriteriaMode").value,
-        criteria_config: collectEngagementCriteriaConfig(),
-      },
-    });
-    state.engagement.preview = response;
-    renderTargetSummary("engagement");
-    renderEngagementPreview(response);
-    updateEngagementMessagePreview();
+    if (!ensureConnectionConfigured() || !ensureTargetSelection("engagement") || !validateEngagementCriteriaSelection()) return;
+    await loadEngagementPreviewForCurrentSelection();
     showNotice("Quantidade de alunos inativos por turma carregada com sucesso.", "success");
   } catch (error) {
     state.engagement.preview = null;
@@ -3369,8 +4275,83 @@ async function previewEngagementTargets() {
   }
 }
 
+async function loadEngagementPreviewForCurrentSelection() {
+  const response = await apiFetch("/api/engagement/inactive-targets", {
+    method: "POST",
+    body: {
+      ...getConnectionPayload(),
+      ...getTargetPayload("engagement"),
+      criteria_modes: selectedEngagementCriteriaModes(),
+      criteria_mode: selectedEngagementCriteriaModes()[0] || "never_accessed",
+      criteria_config: collectEngagementCriteriaConfig(),
+      save_report: true,
+    },
+  });
+  state.engagement.preview = response;
+  if (response.report_job?.id) {
+    state.selectedReportId = response.report_job.id;
+    await loadHistory();
+    renderReports();
+    renderHeaderMetrics();
+    showNotice("Relatorio CSV de conferencia gerado na aba Relatorios.", "success");
+  }
+  renderTargetSummary("engagement");
+  renderEngagementPreview(response);
+  updateEngagementMessagePreview();
+  return response;
+}
+
 function toggleScheduleField() {
   $("#scheduleField").classList.toggle("hidden", $("#publishMode").value !== "schedule");
+}
+
+function selectedEngagementCriteriaModes() {
+  const modes = [];
+  if ($("#engagementCriterionNeverAccessed")?.checked) modes.push("never_accessed");
+  if ($("#engagementCriterionLowActivity")?.checked) modes.push("low_total_activity");
+  if ($("#engagementCriterionMissingQuiz")?.checked) modes.push("missing_quiz");
+  if ($("#engagementCriterionMissingAssignment")?.checked) modes.push("missing_assignment");
+  return modes;
+}
+
+function selectedEngagementHasInactivity() {
+  const modes = selectedEngagementCriteriaModes();
+  return modes.includes("never_accessed") || modes.includes("low_total_activity");
+}
+
+function selectedEngagementHasActivity() {
+  const modes = selectedEngagementCriteriaModes();
+  return modes.includes("missing_quiz") || modes.includes("missing_assignment");
+}
+
+function applyEngagementCriteriaSelection(rawModes) {
+  const modes = normalizeEngagementCriteriaModes(rawModes);
+  $("#engagementCriterionNeverAccessed").checked = modes.includes("never_accessed");
+  $("#engagementCriterionLowActivity").checked = modes.includes("low_total_activity");
+  $("#engagementCriterionMissingQuiz").checked = modes.includes("missing_quiz");
+  $("#engagementCriterionMissingAssignment").checked = modes.includes("missing_assignment");
+  toggleEngagementCriteriaFields();
+}
+
+function normalizeEngagementCriteriaModes(rawModes) {
+  const aliases = {
+    missing_activity: "missing_assignment",
+    incomplete_resources: "never_accessed",
+    never_accessed_or_incomplete_resources: "never_accessed",
+  };
+  const defaults = ["never_accessed", "low_total_activity"];
+  const values = Array.isArray(rawModes)
+    ? rawModes
+    : String(rawModes || "").split(",").filter(Boolean);
+  const normalized = values
+    .map((mode) => aliases[String(mode).trim()] || String(mode).trim())
+    .filter((mode) => ["never_accessed", "low_total_activity", "missing_quiz", "missing_assignment"].includes(mode));
+  return normalized.length ? unique(normalized) : defaults;
+}
+
+function toggleEngagementCriteriaFields() {
+  $("#engagementMinutesField").classList.toggle("hidden", !$("#engagementCriterionLowActivity").checked);
+  renderGuidedFlowModal();
 }
 
 function updateAnnouncementPreview() {
@@ -3473,10 +4454,8 @@ function updateEngagementMessagePreview() {
   const preview = $("#engagementMessagePreview");
   if (!preview) return;
   renderTemplateStatus("engagement");
-  const sampleRecipient = firstEngagementPreviewRecipient();
-  const sampleCourse = sampleRecipient
-    ? findCourseByRef(sampleRecipient.course_ref || sampleRecipient.course_id)
-    : firstTargetCourse("engagement");
+  const sampleRecipient = firstEngagementPreviewRecipient() || null;
+  const sampleCourse = sampleRecipient ? findCourseByRef(sampleRecipient.course_ref || sampleRecipient.course_id) : firstTargetCourse("engagement");
   if (!sampleCourse) {
     preview.classList.add("empty-state");
     preview.innerHTML = "Selecione as turmas, carregue o alvo e gere a amostra da mensagem para inativos.";
@@ -3484,30 +4463,45 @@ function updateEngagementMessagePreview() {
     return;
   }
   preview.classList.remove("empty-state");
-  const renderedSubject = renderCourseTemplate(
-    $("#engagementSubject").value.trim() || "Acompanhamento de acesso ao curso",
-    sampleCourse,
-    {
-      student_name: sampleRecipient?.student_name || "Nome do aluno",
-    },
-  );
-  const renderedBody = escapeHtml(
-    renderCourseTemplate(
-      $("#engagementMessage").value.trim() || "Ola {{student_name}}, estamos acompanhando sua atividade no curso {{course_name}}.",
-      sampleCourse,
-      {
-        student_name: sampleRecipient?.student_name || "Nome do aluno",
-      },
-    ),
-  ).replaceAll("\n", "<br>");
+  const inactivityRecipient = firstEngagementPreviewRecipientByKind("inactivity") || sampleRecipient;
+  const activityRecipient = firstEngagementPreviewRecipientByKind("missing_activity") || sampleRecipient;
+  const blocks = [];
+  if (selectedEngagementHasInactivity()) {
+    blocks.push(renderEngagementPreviewMessageBlock(
+      "Inatividade",
+      $("#engagementSubject").value.trim() || "Acompanhamento de acesso ao curso",
+      $("#engagementMessage").value.trim() || "Ola {{student_name}}, percebemos {{reason}} em {{course_name}}.",
+      inactivityRecipient,
+    ));
+  }
+  if (selectedEngagementHasActivity()) {
+    blocks.push(renderEngagementPreviewMessageBlock(
+      "Atividade objetiva/integradora pendente",
+      $("#engagementActivitySubject").value.trim() || "Atividade pendente no curso",
+      $("#engagementActivityMessage").value.trim() || "Ola {{student_name}}, ficou pendente em {{course_name}}: {{missing_activities}}.",
+      activityRecipient,
+    ));
+  }
   preview.innerHTML = `
+    ${blocks.join("") || `<div class="empty-state">Selecione pelo menos um filtro para gerar a amostra.</div>`}
+  `;
+  syncCollapsibleCards();
+}
+
+function renderEngagementPreviewMessageBlock(label, subject, body, sampleRecipient) {
+  const sampleCourse = sampleRecipient
+    ? findCourseByRef(sampleRecipient.course_ref || sampleRecipient.course_id)
+    : firstTargetCourse("engagement");
+  const context = engagementTemplateContext(sampleRecipient);
+  const renderedSubject = renderCourseTemplate(subject, sampleCourse, context);
+  const renderedBody = escapeHtml(renderCourseTemplate(body, sampleCourse, context)).replaceAll("\n", "<br>");
+  return `
     <div class="message-preview-block">
-      <strong>${escapeHtml(renderedSubject)}</strong>
-      <div class="compact-meta">Amostra com ${escapeHtml(sampleRecipient?.student_name || "Nome do aluno")} | ${escapeHtml(sampleCourse.course_name || sampleCourse.course_ref || "-")}</div>
+      <strong>${escapeHtml(label)}: ${escapeHtml(renderedSubject)}</strong>
+      <div class="compact-meta">Amostra com ${escapeHtml(sampleRecipient?.student_name || "Nome do aluno")} | ${escapeHtml(sampleCourse?.course_name || sampleCourse?.course_ref || "-")}</div>
     </div>
     <div class="message-preview-block message-preview-html">${renderedBody}</div>
   `;
-  syncCollapsibleCards();
 }
 
 function updateAttachmentMeta(event) {
@@ -3553,6 +4547,19 @@ function firstMessagePreviewRecipient() {
 
 function firstEngagementPreviewRecipient() {
   return state.engagement.preview?.items?.[0] || null;
+}
+
+function firstEngagementPreviewRecipientByKind(kind) {
+  return (state.engagement.preview?.items || []).find((item) => item.message_kind === kind) || null;
+}
+
+function engagementTemplateContext(sampleRecipient) {
+  return {
+    student_name: sampleRecipient?.student_name || "Nome do aluno",
+    reason: sampleRecipient?.reasons_label || "motivo do filtro",
+    missing_activities: sampleRecipient?.missing_activities_label || (sampleRecipient?.missing_activity_names || []).join(", ") || "atividades pendentes",
+    activity_type: sampleRecipient?.activity_type_label || "atividade",
+  };
 }
 
 function findCourseByRef(ref) {
@@ -3661,7 +4668,8 @@ async function submitEngagementJob(event) {
       body: {
         ...getConnectionPayload(),
         ...getTargetPayload("engagement"),
-        criteria_mode: $("#engagementCriteriaMode").value,
+        criteria_modes: selectedEngagementCriteriaModes(),
+        criteria_mode: selectedEngagementCriteriaModes()[0] || "never_accessed",
         criteria_config: collectEngagementCriteriaConfig(),
       },
     });
@@ -3677,6 +4685,12 @@ async function submitEngagementJob(event) {
   } finally {
     setBusy(button, false);
   }
+}
+
+function submitEngagementGuidedJob(event) {
+  event.preventDefault();
+  const hasTargets = Boolean(state.engagement.preview?.items?.length);
+  openGuidedFlow("engagement", hasTargets ? 2 : state.engagement.preview ? 1 : 0);
 }
 
 async function confirmReviewedSend() {
@@ -3878,9 +4892,12 @@ function renderEngagementJob(job) {
     { label: "Turma", format: (row) => escapeHtml(row.course_name || "-") },
     { label: "Alunos", format: (row) => escapeHtml(String(row.students_found || 0)) },
     { label: "Alvo", format: (row) => escapeHtml(String(row.recipients_targeted || 0)) },
-    { label: "Sem acesso", format: (row) => escapeHtml(String(row.never_accessed_matches || 0)) },
-    { label: "Pendentes", format: (row) => escapeHtml(String(row.incomplete_resources_matches || 0)) },
-    { label: "Sem atividade", format: (row) => escapeHtml(String(row.inactive_days_matches || 0)) },
+    { label: "Inatividade", format: (row) => escapeHtml(String(row.inactivity_messages || 0)) },
+    { label: "Pendencias", format: (row) => escapeHtml(String(row.activity_messages || 0)) },
+    { label: "Nunca entrou", format: (row) => escapeHtml(String(row.never_accessed_matches || 0)) },
+    { label: "Poucos min", format: (row) => escapeHtml(String(row.low_activity_matches || 0)) },
+    { label: "Ativ. objetiva", format: (row) => escapeHtml(String(row.missing_quiz_matches || 0)) },
+    { label: "Ativ. integradora", format: (row) => escapeHtml(String(row.missing_assignment_matches || 0)) },
     { label: "Enviados", format: (row) => escapeHtml(String(row.recipients_sent || 0)) },
     { label: "Status", format: (row) => statusChip(row.status) },
     { label: "Erro", format: (row) => escapeHtml(row.error || "-") },
@@ -4015,6 +5032,13 @@ function renderReportDetail() {
     return;
   }
   const reportLink = item.report_filename ? `<a class="btn btn-secondary" href="/api/history/${item.id}/csv">Baixar CSV</a>` : "";
+  const editableAnnouncements = announcementEditableRows(item);
+  const batchEditButton = item.kind === "announcement" && editableAnnouncements.length
+    ? `<button class="btn btn-primary" type="button" data-action="edit-announcement-batch" data-job-id="${escapeHtml(item.id)}">Editar avisos do lote (${escapeHtml(String(editableAnnouncements.length))})</button>`
+    : "";
+  const engagementReloadButton = item.kind === "engagement"
+    ? `<button class="btn btn-secondary" type="button" data-action="load-engagement-report" data-job-id="${escapeHtml(item.id)}">Carregar em Inativos</button>`
+    : "";
   const summaryEntries = Object.entries(item.result?.summary || {}).filter(([, value]) => typeof value !== "object");
   $("#historyDetail").innerHTML = `
     <div class="status-line">
@@ -4022,20 +5046,97 @@ function renderReportDetail() {
       <span>${escapeHtml(item.title || item.kind || "Relatorio")} - ${escapeHtml(formatDate(item.created_at))}</span>
     </div>
     <div class="summary-grid">${summaryEntries.slice(0, 8).map(([key, value]) => `<div class="summary-card"><span>${escapeHtml(toTitle(key))}</span><strong>${escapeHtml(formatSummaryValue(value))}</strong></div>`).join("")}</div>
-    <div class="button-row">${reportLink}</div>
-    ${(item.result?.course_results || []).length ? renderTable(reportColumns(item.kind), item.result.course_results) : `<div class="empty-state">Este relatorio ainda nao possui resultados detalhados.</div>`}
+    <div class="button-row">${batchEditButton}${engagementReloadButton}${reportLink}</div>
+    ${item.kind === "engagement" ? renderEngagementAnalysis(item.result?.analysis, { showLoadButton: false, reportId: item.id }) : ""}
+    ${(item.result?.course_results || []).length ? renderTable(reportColumns(item.kind, item), item.result.course_results) : `<div class="empty-state">Este relatorio ainda nao possui resultados detalhados.</div>`}
   `;
 }
 
-function reportColumns(kind) {
+function loadEngagementReportIntoTab(jobId) {
+  const item = state.history.find((entry) => entry.id === jobId);
+  if (!item || item.kind !== "engagement") {
+    showNotice("Nao foi possivel carregar este relatorio na aba de inativos.", "error");
+    return;
+  }
+  const requestSummary = item.summary || {};
+  const resultSummary = item.result?.summary || {};
+  const criteriaModes = resultSummary.criteria_modes || resultSummary.criteria_mode || [];
+  applyEngagementCriteriaSelection(criteriaModes);
+  if (resultSummary.criteria_config?.max_total_activity_minutes) {
+    $("#engagementMaxActivityMinutes").value = String(resultSummary.criteria_config.max_total_activity_minutes);
+  }
+  if (Array.isArray(requestSummary.course_refs) && requestSummary.course_refs.length) {
+    state.engagement.mode = "courses";
+    state.engagement.courseRefs = [...requestSummary.course_refs];
+    state.engagement.groupIds = [];
+    state.engagement.selectAllGroups = false;
+  } else if (requestSummary.select_all_groups) {
+    state.engagement.mode = "groups";
+    state.engagement.groupIds = [];
+    state.engagement.selectAllGroups = true;
+  } else if (Array.isArray(requestSummary.group_ids) && requestSummary.group_ids.length) {
+    state.engagement.mode = "groups";
+    state.engagement.groupIds = [...requestSummary.group_ids];
+    state.engagement.courseRefs = [];
+    state.engagement.selectAllGroups = false;
+  }
+  state.engagement.preview = {
+    summary: resultSummary,
+    courses: item.result?.course_results || [],
+    items: [],
+    analysis: item.result?.analysis || null,
+    report_job: {
+      id: item.id,
+      report_filename: item.report_filename,
+    },
+  };
+  renderModeSwitch("engagement");
+  renderTargetControls("engagement");
+  renderTargetSummary("engagement");
+  renderEngagementPreview(state.engagement.preview);
+  updateEngagementMessagePreview();
+  persistUiState();
+  openTab("engagement");
+  showNotice("Analise carregada novamente na aba Inativos.", "success");
+}
+
+function renderEngagementReviewMessageBlock(label, subject, message, sampleRecipient) {
+  const sampleCourse = sampleRecipient
+    ? findCourseByRef(sampleRecipient.course_ref || sampleRecipient.course_id)
+    : firstTargetCourse("engagement");
+  const context = engagementTemplateContext(sampleRecipient);
+  const previewSubject = renderCourseTemplate(subject || "-", sampleCourse, context);
+  const previewBody = renderCourseTemplate(message || "", sampleCourse, context);
+  return `
+    <div class="message-block">
+      <strong>${escapeHtml(label)}: ${escapeHtml(previewSubject)}</strong>
+      <div class="review-target-meta">
+        <span>${sampleCourse ? `Turma: ${escapeHtml(sampleCourse.course_name || sampleCourse.course_ref || "-")}` : "Sem turma para amostra"}</span>
+        <span>Aluno: ${escapeHtml(sampleRecipient?.student_name || "Nome do aluno")}</span>
+        <span>Motivo: ${escapeHtml(context.reason || "-")}</span>
+      </div>
+    </div>
+    <div class="message-block"><pre>${escapeHtml(previewBody)}</pre></div>
+  `;
+}
+
+function announcementEditableRows(job) {
+  if (!job || job.kind !== "announcement") return [];
+  return (job.result?.course_results || []).filter((row) => canEditAnnouncementResult(row));
+}
+
+function reportColumns(kind, job = null) {
   if (kind === "engagement") {
     return [
       { label: "Turma", format: (row) => escapeHtml(row.course_name || "-") },
       { label: "Alunos", format: (row) => escapeHtml(String(row.students_found || 0)) },
       { label: "Alvo", format: (row) => escapeHtml(String(row.recipients_targeted || 0)) },
-      { label: "Sem acesso", format: (row) => escapeHtml(String(row.never_accessed_matches || 0)) },
-      { label: "Pendentes", format: (row) => escapeHtml(String(row.incomplete_resources_matches || 0)) },
-      { label: "Sem atividade", format: (row) => escapeHtml(String(row.inactive_days_matches || 0)) },
+      { label: "Inatividade", format: (row) => escapeHtml(String(row.inactivity_messages || 0)) },
+      { label: "Pendencias", format: (row) => escapeHtml(String(row.activity_messages || 0)) },
+      { label: "Nunca entrou", format: (row) => escapeHtml(String(row.never_accessed_matches || 0)) },
+      { label: "Poucos min", format: (row) => escapeHtml(String(row.low_activity_matches || 0)) },
+      { label: "Ativ. objetiva", format: (row) => escapeHtml(String(row.missing_quiz_matches || 0)) },
+      { label: "Ativ. integradora", format: (row) => escapeHtml(String(row.missing_assignment_matches || 0)) },
       { label: "Enviados", format: (row) => escapeHtml(String(row.recipients_sent || 0)) },
       { label: "Status", format: (row) => statusChip(row.status) },
       { label: "Erro", format: (row) => escapeHtml(row.error || "-") },
@@ -4056,10 +5157,347 @@ function reportColumns(kind) {
     { label: "Turma", format: (row) => escapeHtml(row.course_name || "-") },
     { label: "ID", format: (row) => escapeHtml(String(row.announcement_id || "-")) },
     { label: "Publicado", format: (row) => row.published ? "Sim" : "Nao" },
+    { label: "Edicao", format: (row) => row.announcement_edited ? `Editado em ${escapeHtml(formatDate(row.announcement_edited_at))}` : "-" },
     { label: "Anexo", format: (row) => escapeHtml(row.attachment_name || "-") },
     { label: "Status", format: (row) => statusChip(row.status) },
     { label: "Erro", format: (row) => escapeHtml(row.error || "-") },
+    {
+      label: "Acao",
+      format: (row) => canEditAnnouncementResult(row)
+        ? `<button class="mini-btn" type="button" data-action="edit-announcement" data-job-id="${escapeHtml(job?.id || state.selectedReportId || "")}" data-course-ref="${escapeHtml(row.course_ref || "")}" data-announcement-id="${escapeHtml(String(row.announcement_id || ""))}">Editar</button>`
+        : `<span class="compact-meta">-</span>`,
+    },
   ];
+}
+
+function canEditAnnouncementResult(row) {
+  return Boolean(
+    row
+    && row.status === "success"
+    && row.announcement_id
+    && row.course_ref
+    && !row.dry_run,
+  );
+}
+
+function resetAnnouncementEditState() {
+  state.announcementEdit = {
+    jobId: null,
+    courseRef: null,
+    announcementId: null,
+    target: null,
+    mode: "single",
+    targets: [],
+  };
+}
+
+async function openAnnouncementEditModal(trigger) {
+  const jobId = trigger.dataset.jobId;
+  const courseRef = trigger.dataset.courseRef;
+  const announcementId = trigger.dataset.announcementId;
+  if (!jobId || !courseRef || !announcementId) {
+    showNotice("Nao foi possivel identificar o comunicado para edicao.", "error");
+    return;
+  }
+
+  state.announcementEdit = {
+    jobId,
+    courseRef,
+    announcementId,
+    target: null,
+    mode: "single",
+    targets: [],
+  };
+  hideAnnouncementEditNotice();
+  setAnnouncementEditMode("single");
+  $("#announcementEditTitle").value = "";
+  $("#announcementEditMessage").value = "";
+  $("#announcementEditLockComment").checked = false;
+  $("#announcementBatchEditList").innerHTML = "";
+  $("#announcementEditTargetSummary").innerHTML = `<div class="empty-state">Carregando dados do comunicado...</div>`;
+  $("#announcementEditModal").classList.remove("hidden");
+  $("#announcementEditModal").setAttribute("aria-hidden", "false");
+  setBusy(trigger, true, "Abrindo...");
+
+  try {
+    const params = new URLSearchParams({ course_ref: courseRef });
+    const target = await apiFetch(`/api/history/${encodeURIComponent(jobId)}/announcements/${encodeURIComponent(announcementId)}/edit?${params.toString()}`);
+    state.announcementEdit.target = target;
+    $("#announcementEditTitle").value = target.title || "";
+    $("#announcementEditMessage").value = target.message_html || "";
+    $("#announcementEditLockComment").checked = Boolean(target.lock_comment);
+    renderAnnouncementEditSummary(target);
+    $("#announcementEditTitle").focus();
+  } catch (error) {
+    showAnnouncementEditNotice(error.message, "error");
+  } finally {
+    setBusy(trigger, false);
+  }
+}
+
+async function openAnnouncementBatchEditModal(trigger) {
+  const jobId = trigger.dataset.jobId;
+  const job = state.history.find((entry) => entry.id === jobId);
+  const rows = announcementEditableRows(job);
+  if (!job || !rows.length) {
+    showNotice("Nenhum comunicado editavel encontrado neste relatorio.", "error");
+    return;
+  }
+
+  state.announcementEdit = {
+    jobId,
+    courseRef: null,
+    announcementId: null,
+    target: null,
+    mode: "batch",
+    targets: [],
+  };
+  hideAnnouncementEditNotice();
+  setAnnouncementEditMode("batch");
+  $("#announcementEditTargetSummary").innerHTML = `
+    <div class="summary-card"><span>Lote</span><strong>${escapeHtml(job.title || job.kind || "-")}</strong></div>
+    <div class="summary-card"><span>Avisos editaveis</span><strong>${escapeHtml(String(rows.length))}</strong></div>
+    <div class="summary-card"><span>Modo</span><strong>Edicao em massa</strong></div>
+  `;
+  $("#announcementBatchEditList").innerHTML = `<div class="empty-state">Carregando comunicados do lote...</div>`;
+  $("#saveAnnouncementEditBtn").disabled = true;
+  $("#announcementEditModal").classList.remove("hidden");
+  $("#announcementEditModal").setAttribute("aria-hidden", "false");
+  setBusy(trigger, true, "Abrindo...");
+
+  try {
+    const targets = await Promise.all(rows.map(async (row) => {
+      const params = new URLSearchParams({ course_ref: row.course_ref });
+      const target = await apiFetch(`/api/history/${encodeURIComponent(jobId)}/announcements/${encodeURIComponent(row.announcement_id)}/edit?${params.toString()}`);
+      return { ...target, course_ref: row.course_ref, announcement_id: row.announcement_id };
+    }));
+    state.announcementEdit.targets = targets;
+    renderAnnouncementBatchEditList(targets);
+    $("#saveAnnouncementEditBtn").disabled = false;
+  } catch (error) {
+    showAnnouncementEditNotice(error.message, "error");
+  } finally {
+    setBusy(trigger, false);
+  }
+}
+
+function setAnnouncementEditMode(mode) {
+  const isBatch = mode === "batch";
+  $("#announcementEditSingleFields").classList.toggle("hidden", isBatch);
+  $("#announcementBatchEditList").classList.toggle("hidden", !isBatch);
+  $("#announcementEditModalTitle").textContent = isBatch ? "Editar avisos do lote" : "Editar comunicado enviado";
+  $("#announcementEditModalSubtitle").textContent = isBatch
+    ? "Corrija varios avisos ja criados no Canvas em uma unica tela."
+    : "Corrija o aviso ja criado no Canvas para a turma selecionada.";
+  $("#saveAnnouncementEditBtn").textContent = isBatch ? "Salvar todos no Canvas" : "Salvar no Canvas";
+  $("#saveAnnouncementEditBtn").dataset.originalText = $("#saveAnnouncementEditBtn").textContent;
+  $("#saveAnnouncementEditBtn").disabled = false;
+}
+
+function renderAnnouncementBatchEditList(targets) {
+  if (!targets.length) {
+    $("#announcementBatchEditList").innerHTML = `<div class="empty-state">Nenhum comunicado editavel encontrado.</div>`;
+    return;
+  }
+  $("#announcementBatchEditList").innerHTML = targets.map((target, index) => `
+    <article class="announcement-batch-card" data-announcement-batch-index="${escapeHtml(String(index))}">
+      <div class="compact-header">
+        <div>
+          <strong>${escapeHtml(target.course_name || target.course_ref || `Turma ${index + 1}`)}</strong>
+          <div class="compact-meta">Comunicado ${escapeHtml(String(target.announcement_id || "-"))}</div>
+        </div>
+        <span class="status-chip status-info" data-announcement-batch-status="${escapeHtml(String(index))}">pronto</span>
+      </div>
+      <label class="field">
+        <span>Titulo corrigido</span>
+        <input data-announcement-batch-title="${escapeHtml(String(index))}" type="text" value="${escapeHtml(target.title || "")}">
+      </label>
+      <label class="field">
+        <span>Mensagem HTML corrigida</span>
+        <textarea data-announcement-batch-message="${escapeHtml(String(index))}" rows="7">${escapeHtml(target.message_html || "")}</textarea>
+      </label>
+      <label class="switch-line">
+        <input data-announcement-batch-lock="${escapeHtml(String(index))}" class="switch-input" type="checkbox" ${target.lock_comment ? "checked" : ""}>
+        <span class="switch-track" aria-hidden="true"></span>
+        <span class="switch-copy">Bloquear comentarios</span>
+      </label>
+    </article>
+  `).join("");
+}
+
+function closeAnnouncementEditModal() {
+  $("#announcementEditModal").classList.add("hidden");
+  $("#announcementEditModal").setAttribute("aria-hidden", "true");
+  hideAnnouncementEditNotice();
+  resetAnnouncementEditState();
+}
+
+function renderAnnouncementEditSummary(target) {
+  $("#announcementEditTargetSummary").innerHTML = [
+    ["Turma", target.course_name || target.course_ref || "-"],
+    ["Comunicado", target.announcement_id || "-"],
+    ["Estado", target.published ? "Publicado" : "Nao publicado"],
+    ["Origem", target.base_url || activeCanvasBaseUrl() || "-"],
+  ].map(([label, value]) => `
+    <div class="summary-card">
+      <span>${escapeHtml(label)}</span>
+      <strong>${escapeHtml(formatSummaryValue(value))}</strong>
+    </div>
+  `).join("");
+}
+
+function validateAnnouncementEditForm() {
+  clearFieldValidation();
+  if (state.announcementEdit.mode === "batch") {
+    return validateAnnouncementBatchEditForm();
+  }
+  const target = state.announcementEdit.target || {};
+  const connection = getConnectionPayload();
+  const hasBaseUrl = Boolean(connection.base_url || target.base_url || activeCanvasBaseUrl());
+  const hasToken = Boolean(connection.access_token || activeCanvasEnvTokenAvailable());
+  if (!hasBaseUrl) {
+    showAnnouncementEditNotice("Configure a Base URL na aba Conexao ou no .env antes de editar no Canvas.", "error");
+    return false;
+  }
+  if (!hasToken) {
+    showAnnouncementEditNotice("Informe um token na aba Conexao ou configure um token no .env antes de editar no Canvas.", "error");
+    return false;
+  }
+  if (!$("#announcementEditTitle").value.trim()) {
+    markInvalid("#announcementEditTitle");
+    $("#announcementEditTitle").focus();
+    showAnnouncementEditNotice("Informe o titulo corrigido do comunicado.", "error");
+    return false;
+  }
+  if (!$("#announcementEditMessage").value.trim()) {
+    markInvalid("#announcementEditMessage");
+    $("#announcementEditMessage").focus();
+    showAnnouncementEditNotice("Informe a mensagem corrigida do comunicado.", "error");
+    return false;
+  }
+  return true;
+}
+
+function validateAnnouncementBatchEditForm() {
+  const connection = getConnectionPayload();
+  const targets = state.announcementEdit.targets || [];
+  const hasBaseUrl = Boolean(connection.base_url || targets.some((target) => target.base_url) || activeCanvasBaseUrl());
+  const hasToken = Boolean(connection.access_token || activeCanvasEnvTokenAvailable());
+  if (!hasBaseUrl) {
+    showAnnouncementEditNotice("Configure a Base URL na aba Conexao ou no .env antes de editar no Canvas.", "error");
+    return false;
+  }
+  if (!hasToken) {
+    showAnnouncementEditNotice("Informe um token na aba Conexao ou configure um token no .env antes de editar no Canvas.", "error");
+    return false;
+  }
+  if (!targets.length) {
+    showAnnouncementEditNotice("Nenhum comunicado carregado para salvar.", "error");
+    return false;
+  }
+  for (const [index] of targets.entries()) {
+    const titleField = document.querySelector(`[data-announcement-batch-title="${index}"]`);
+    const messageField = document.querySelector(`[data-announcement-batch-message="${index}"]`);
+    if (!titleField?.value.trim()) {
+      markInvalid(titleField);
+      titleField.focus();
+      showAnnouncementEditNotice("Todos os comunicados precisam de titulo.", "error");
+      return false;
+    }
+    if (!messageField?.value.trim()) {
+      markInvalid(messageField);
+      messageField.focus();
+      showAnnouncementEditNotice("Todos os comunicados precisam de mensagem.", "error");
+      return false;
+    }
+  }
+  return true;
+}
+
+async function saveAnnouncementEdit(event) {
+  event.preventDefault();
+  hideAnnouncementEditNotice();
+  if (!validateAnnouncementEditForm()) return;
+
+  const button = $("#saveAnnouncementEditBtn");
+  setBusy(button, true, "Salvando...");
+  try {
+    if (state.announcementEdit.mode === "batch") {
+      await saveAnnouncementBatchEdit();
+      return;
+    }
+    const { jobId, courseRef, announcementId } = state.announcementEdit;
+    await apiFetch(`/api/history/${encodeURIComponent(jobId)}/announcements/${encodeURIComponent(announcementId)}`, {
+      method: "PUT",
+      body: {
+        ...getConnectionPayload(),
+        course_ref: courseRef,
+        title: $("#announcementEditTitle").value.trim(),
+        message_html: $("#announcementEditMessage").value.trim(),
+        lock_comment: $("#announcementEditLockComment").checked,
+      },
+    });
+    await loadHistory();
+    await loadAnalytics();
+    renderReports();
+    closeAnnouncementEditModal();
+    showNotice("Comunicado atualizado no Canvas e marcado no historico.", "success");
+  } catch (error) {
+    showAnnouncementEditNotice(error.message, "error");
+  } finally {
+    setBusy(button, false);
+  }
+}
+
+async function saveAnnouncementBatchEdit() {
+  const { jobId, targets } = state.announcementEdit;
+  let savedCount = 0;
+  const failures = [];
+
+  for (const [index, target] of targets.entries()) {
+    const statusBadge = document.querySelector(`[data-announcement-batch-status="${index}"]`);
+    if (statusBadge) {
+      statusBadge.className = "status-chip status-info";
+      statusBadge.textContent = "salvando";
+    }
+    try {
+      const connectionPayload = getConnectionPayload();
+      await apiFetch(`/api/history/${encodeURIComponent(jobId)}/announcements/${encodeURIComponent(target.announcement_id)}`, {
+        method: "PUT",
+        body: {
+          ...connectionPayload,
+          base_url: connectionPayload.base_url || target.base_url || "",
+          course_ref: target.course_ref,
+          title: document.querySelector(`[data-announcement-batch-title="${index}"]`).value.trim(),
+          message_html: document.querySelector(`[data-announcement-batch-message="${index}"]`).value.trim(),
+          lock_comment: document.querySelector(`[data-announcement-batch-lock="${index}"]`).checked,
+        },
+      });
+      savedCount += 1;
+      if (statusBadge) {
+        statusBadge.className = "status-chip status-success";
+        statusBadge.textContent = "salvo";
+      }
+    } catch (error) {
+      failures.push(`${target.course_name || target.course_ref || target.announcement_id}: ${error.message}`);
+      if (statusBadge) {
+        statusBadge.className = "status-chip status-error";
+        statusBadge.textContent = "erro";
+      }
+    }
+  }
+
+  await loadHistory();
+  await loadAnalytics();
+  renderReports();
+
+  if (failures.length) {
+    showAnnouncementEditNotice(`${savedCount} aviso(s) salvos; ${failures.length} falharam. ${failures.slice(0, 2).join(" | ")}`, "error");
+    return;
+  }
+
+  closeAnnouncementEditModal();
+  showNotice(`${savedCount} aviso(s) atualizados no Canvas e marcados no historico.`, "success");
 }
 
 function reportAnalyticsColumns(sectionKey) {
@@ -4149,16 +5587,19 @@ const TABLE_COLUMN_HELP = {
   Alunos: "Quantidade total de alunos encontrados no curso para aquele contexto.",
   Alvo: "Quantidade de alunos ou registros que realmente entram no criterio atual.",
   Cobertura: "Percentual do curso que entrou no alvo, calculado sobre alunos encontrados.",
-  "Sem acesso": "Aluno com page_views = 0 e participations = 0 no analytics do Canvas. Mesmo assim a mensagem pode chegar pela Inbox do Canvas e por email so se a notificacao estiver ativa.",
-  Pendentes: "Quantidade de alunos com requisitos de modulos ainda nao concluidos no Canvas.",
-  "Sem atividade": "Quantidade de alunos cujo last_activity_at ficou alem do limite configurado.",
-  "Baixa atividade": "Quantidade de alunos com total_activity_time abaixo do limite configurado.",
-  Modulo: "Indica se o curso tem requisitos de modulos configurados para medir pendencias.",
-  "Status API": "Mostra se analytics, progresso de modulos e atividade de enrollments vieram disponiveis do Canvas.",
+  Comunicados: "Quantidade de mensagens que serao enviadas; pode ser maior que alunos alvo quando ha dois tipos de comunicado.",
+  Inatividade: "Quantidade de comunicados de inatividade gerados por nunca entrar ou por poucos minutos.",
+  Pendencias: "Quantidade de comunicados de atividade objetiva/integr. pendente gerados.",
+  "Nunca entrou": "Aluno sem page views e sem participacoes no analytics do Canvas.",
+  "Poucos min": "Aluno com tempo total na disciplina abaixo do limite informado.",
+  "Poucos minutos": "Aluno com tempo total na disciplina abaixo do limite informado.",
+  "Ativ. integradora": "Quantidade de alunos que nao realizaram pelo menos uma atividade integradora publicada da disciplina.",
+  "Ativ. objetiva": "Quantidade de alunos que nao realizaram pelo menos uma atividade objetiva publicada da disciplina.",
+  Atividades: "Quantidade de atividades integradoras ou atividades objetivas publicadas que o painel verificou na disciplina.",
+  Comunicado: "Tipo de mensagem que a linha vai receber: inatividade ou pendencia de atividade.",
+  "Status API": "Mostra se a leitura de quizzes/atividades avaliativas e submissoes veio disponivel do Canvas.",
   Aluno: "Nome do aluno que entrou no preview ou no lote.",
-  Acessos: "Visualizacoes e participacoes retornadas pelo analytics do Canvas para o aluno.",
-  Atividade: "Ultima atividade registrada e tempo total de atividade acumulado pelo Canvas.",
-  Recursos: "Quantidade de requisitos concluidos sobre o total de requisitos configurados no curso.",
+  Faltando: "Lista das atividades publicadas que o aluno ainda nao fez.",
   Motivo: "Resumo do por que o aluno entrou no filtro atual de inatividade.",
   Estrategia: "Forma usada para enviar a mensagem: por usuarios ou por contexto da turma.",
   Enviados: "Quantidade que o painel conseguiu enviar de fato naquele registro.",
@@ -4341,9 +5782,12 @@ function summaryChips(summary) {
 }
 
 function renderSettingsInfo(settings) {
+  const realEnvironment = settings.canvas_environments?.real || {};
+  const testEnvironment = settings.canvas_environments?.test || {};
   $("#settingsInfo").innerHTML = `
-    <div class="dashboard-item"><strong>Base URL padrao</strong><div class="compact-meta mono">${escapeHtml(settings.default_base_url || "nao configurada")}</div></div>
-    <div class="dashboard-item"><strong>Token no .env</strong><div class="compact-meta">${settings.env_token_available ? `Disponivel como ${escapeHtml(formatEnvTokenSource(settings.env_token_source))}.` : "Nao configurado."}</div></div>
+    <div class="dashboard-item"><strong>Ambiente ativo</strong><div class="compact-meta">${escapeHtml(canvasEnvironmentLabel())}</div></div>
+    <div class="dashboard-item"><strong>Real</strong><div class="compact-meta mono">${escapeHtml(realEnvironment.default_base_url || "nao configurada")}</div><div class="compact-meta">${realEnvironment.env_token_available ? `Token disponivel como ${escapeHtml(formatEnvTokenSource(realEnvironment.env_token_source))}.` : "Token nao configurado."}</div></div>
+    <div class="dashboard-item"><strong>Teste</strong><div class="compact-meta mono">${escapeHtml(testEnvironment.default_base_url || "nao configurada")}</div><div class="compact-meta">${testEnvironment.env_token_available ? `Token disponivel como ${escapeHtml(formatEnvTokenSource(testEnvironment.env_token_source))}.` : "Token nao configurado."}</div></div>
     <div class="dashboard-item"><strong>Banco de dados</strong><div class="compact-meta mono">${escapeHtml(settings.database_backend || "-")} | ${escapeHtml(settings.database_url_masked || "-")}</div></div>
     <div class="dashboard-item"><strong>Retry e timeout</strong><div class="compact-meta">${escapeHtml(String(settings.retry_max_attempts || 0))} tentativa(s) | atraso base ${escapeHtml(String(settings.retry_base_delay || 0))}s | timeout ${escapeHtml(String(settings.request_timeout || 0))}s</div></div>
     <div class="dashboard-item"><strong>Arquivo .env</strong><div class="compact-meta mono">${escapeHtml(settings.env_file_path || "-")}</div></div>
@@ -4588,6 +6032,10 @@ function formatEnvTokenSource(value) {
     access_token: "CANVAS_ACCESS_TOKEN",
     personal_access_token: "CANVAS_PERSONAL_ACCESS_TOKEN",
     api_token: "CANVAS_API_TOKEN",
+    access_token_test: "CANVAS_ACCESS_TOKEN_TEST",
+    personal_access_token_test: "CANVAS_PERSONAL_ACCESS_TOKEN_TEST",
+    api_token_test: "CANVAS_API_TOKEN_TEST",
+    interface: "campo da interface",
     none: "nao configurado",
   };
   return map[value] || value || "token";
@@ -4595,9 +6043,13 @@ function formatEnvTokenSource(value) {
 
 function formatEngagementCriteria(value) {
   const map = {
-    never_accessed: "Somente sem acesso nenhum",
-    incomplete_resources: "Somente com recursos pendentes",
-    never_accessed_or_incomplete_resources: "Sem acesso nenhum ou com recursos pendentes",
+    missing_assignment: "Nao realizou a atividade integradora",
+    missing_quiz: "Nao realizou a atividade objetiva",
+    never_accessed: "Nunca entrou",
+    low_total_activity: "Poucos minutos",
+    missing_activity: "Nao realizou a atividade integradora",
+    incomplete_resources: "Nunca entrou",
+    never_accessed_or_incomplete_resources: "Nunca entrou",
   };
   return map[value] || value || "-";
 }

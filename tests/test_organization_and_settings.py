@@ -43,9 +43,24 @@ class FakeCourseLookupClient:
                 "workflow_state": "available",
                 "term": {"name": "2026/2"},
             },
+            {
+                "id": 34053,
+                "name": "100Avisos",
+                "course_code": "GPR@100Avisos",
+                "workflow_state": "available",
+                "term": {"name": "2026/2"},
+            },
         ]
 
     def get_course(self, course_ref):
+        if str(course_ref) == "34053":
+            return {
+                "id": 34053,
+                "name": "100Avisos",
+                "course_code": "GPR@100Avisos",
+                "workflow_state": "available",
+                "term": {"name": "2026/2"},
+            }
         return {
             "id": int(course_ref),
             "name": f"Curso {course_ref}",
@@ -80,11 +95,13 @@ def test_registered_course_crud_endpoints(app, monkeypatch):
     assert created.status_code == 201
     assert created.get_json()["item"]["course_ref"] == "4501"
     assert created.get_json()["item"]["course_name"] == "Curso 4501"
+    assert created.get_json()["item"]["course_code_short"] == "COD4501"
 
     listed = client.get("/api/registered-courses")
     assert listed.status_code == 200
     assert listed.get_json()["items"][0]["course_ref"] == "4501"
     assert listed.get_json()["items"][0]["course_name"] == "Curso 4501"
+    assert listed.get_json()["items"][0]["course_code_short"] == "COD4501"
 
     deleted = client.delete("/api/registered-courses/4501")
     assert deleted.status_code == 200
@@ -127,6 +144,21 @@ def test_course_catalog_marks_registered_and_bulk_registers_selected(app, monkey
     by_ref = {item["course_ref"]: item for item in items}
     assert by_ref["101"]["already_registered"] is True
     assert by_ref["202"]["already_registered"] is False
+    assert by_ref["101"]["course_code_short"] == "COD101"
+
+    catalog_by_code = client.post(
+        "/api/courses/catalog",
+        json={
+            "base_url": "https://canvas.example.com",
+            "access_token": "token",
+            "search_term": "GPR",
+        },
+    )
+    assert catalog_by_code.status_code == 200
+    code_items = catalog_by_code.get_json()["items"]
+    assert len(code_items) == 1
+    assert code_items[0]["course_ref"] == "34053"
+    assert code_items[0]["course_code_short"] == "GPR"
 
     bulk = client.post(
         "/api/registered-courses/bulk",

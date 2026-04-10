@@ -149,6 +149,34 @@ class CanvasClient:
 
         return items
 
+    def _iter_paginated_payload_key(self, path: str, *, key: str, params=None) -> list[dict]:
+        current_url = self._build_url(path)
+        current_params = params
+        items: list[dict] = []
+
+        while current_url:
+            payload, response = self._request(
+                "GET",
+                current_url,
+                params=current_params,
+                expected_status=(200,),
+            )
+            current_params = None
+
+            if isinstance(payload, dict) and isinstance(payload.get(key), list):
+                items.extend(payload[key])
+            elif isinstance(payload, list):
+                items.extend(payload)
+            else:
+                raise CanvasApiError(
+                    message=f"Resposta paginada do Canvas nao retornou uma lista em {key}.",
+                    details=payload,
+                )
+
+            current_url = self._next_link(response.headers.get("Link", ""))
+
+        return items
+
     @staticmethod
     def _next_link(link_header: str) -> str | None:
         for part in link_header.split(","):
@@ -206,10 +234,34 @@ class CanvasClient:
             params.append(("student_id", str(student_id)))
         return self._iter_paginated(f"/api/v1/courses/{safe_ref}/analytics/student_summaries", params=params)
 
-    def get_bulk_user_progress(self, course_ref: str) -> list[dict]:
+    def list_course_assignments(self, course_ref: str) -> list[dict]:
+        safe_ref = quote(str(course_ref), safe=":")
+        params = [("per_page", "100"), ("order_by", "position")]
+        return self._iter_paginated(f"/api/v1/courses/{safe_ref}/assignments", params=params)
+
+    def list_course_quizzes(self, course_ref: str) -> list[dict]:
         safe_ref = quote(str(course_ref), safe=":")
         params = [("per_page", "100")]
-        return self._iter_paginated(f"/api/v1/courses/{safe_ref}/bulk_user_progress", params=params)
+        return self._iter_paginated(f"/api/v1/courses/{safe_ref}/quizzes", params=params)
+
+    def list_assignment_submissions(self, course_ref: str, assignment_id: int | str) -> list[dict]:
+        safe_ref = quote(str(course_ref), safe=":")
+        safe_assignment_id = quote(str(assignment_id), safe=":")
+        params = [("per_page", "100")]
+        return self._iter_paginated(
+            f"/api/v1/courses/{safe_ref}/assignments/{safe_assignment_id}/submissions",
+            params=params,
+        )
+
+    def list_quiz_submissions(self, course_ref: str, quiz_id: int | str) -> list[dict]:
+        safe_ref = quote(str(course_ref), safe=":")
+        safe_quiz_id = quote(str(quiz_id), safe=":")
+        params = [("per_page", "100"), ("include[]", "submission")]
+        return self._iter_paginated_payload_key(
+            f"/api/v1/courses/{safe_ref}/quizzes/{safe_quiz_id}/submissions",
+            key="quiz_submissions",
+            params=params,
+        )
 
     def create_announcement(
         self,
@@ -265,6 +317,33 @@ class CanvasClient:
             "DELETE",
             f"/api/v1/courses/{safe_ref}/discussion_topics/{safe_topic_id}",
             expected_status=(200, 204),
+        )
+        return payload
+
+    def update_announcement(
+        self,
+        *,
+        course_ref: str,
+        topic_id: int | str,
+        title: str,
+        message_html: str,
+        lock_comment: bool | None = None,
+    ) -> dict:
+        safe_ref = quote(str(course_ref), safe=":")
+        safe_topic_id = quote(str(topic_id), safe=":")
+        form_data = [
+            ("title", title),
+            ("message", message_html),
+        ]
+
+        if lock_comment is not None:
+            form_data.append(("lock_comment", bool_to_canvas(lock_comment)))
+
+        payload, _ = self._request(
+            "PUT",
+            f"/api/v1/courses/{safe_ref}/discussion_topics/{safe_topic_id}",
+            data=form_data,
+            expected_status=(200,),
         )
         return payload
 

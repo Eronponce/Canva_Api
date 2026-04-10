@@ -34,6 +34,7 @@ class FakeCanvasClient:
             "202": [{"id": 2, "name": "Aluno 2"}, {"id": 3, "name": "Aluno 3"}],
         }
         self.announcements_created = []
+        self.announcements_updated = []
         self.conversations_created = []
         self.uploaded_attachments = []
 
@@ -53,6 +54,14 @@ class FakeCanvasClient:
             "id": 5000 + int(course_ref),
             "html_url": f"https://canvas.example.com/courses/{course_ref}/discussion_topics/{5000 + int(course_ref)}",
             "published": kwargs["published"],
+        }
+
+    def update_announcement(self, **kwargs):
+        self.announcements_updated.append(kwargs)
+        return {
+            "id": int(kwargs["topic_id"]),
+            "html_url": f"https://canvas.example.com/courses/{kwargs['course_ref']}/discussion_topics/{kwargs['topic_id']}",
+            "published": True,
         }
 
     def list_course_students(self, course_ref):
@@ -127,6 +136,69 @@ def test_announcement_job_renders_course_placeholders(app, monkeypatch):
     created = fake_client.announcements_created[0]
     assert created["title"] == "Aviso - Cálculo I"
     assert created["message_html"] == "<p>MAT101 | 101 | Cálculo I</p>"
+
+
+def test_history_announcement_can_be_edited_from_report(app, monkeypatch):
+    client = app.test_client()
+    services = app.extensions["services"]
+    fake_client = FakeCanvasClient()
+    monkeypatch.setattr(services["connection_service"], "build_client", lambda payload: fake_client)
+
+    job_manager = services["job_manager"]
+    service = services["announcement_service"]
+    job = job_manager.create_job(kind="announcement", title="Aviso para corrigir")
+
+    service.run_job(
+        job["id"],
+        {
+            "base_url": "https://canvas.example.com",
+            "access_token": "token",
+            "course_ids_text": "101",
+            "title": "Aviso - {{course_name}}",
+            "message_html": "<p>Texto antigo</p>",
+            "publish_mode": "publish_now",
+            "lock_comment": False,
+            "dry_run": False,
+        },
+    )
+    finished = job_manager.get_job(job["id"])
+    row = finished["result"]["course_results"][0]
+
+    edit_target = client.get(
+        f"/api/history/{job['id']}/announcements/{row['announcement_id']}/edit",
+        query_string={"course_ref": row["course_ref"]},
+    )
+    assert edit_target.status_code == 200
+    course_name = "C\u00e1lculo I"
+    assert edit_target.get_json()["title"] == f"Aviso - {course_name}"
+
+    update_response = client.put(
+        f"/api/history/{job['id']}/announcements/{row['announcement_id']}",
+        json={
+            "base_url": "https://canvas.example.com",
+            "access_token": "token",
+            "course_ref": row["course_ref"],
+            "title": "Aviso corrigido - {{course_name}}",
+            "message_html": "<p>Texto corrigido para {{course_name}}</p>",
+            "lock_comment": True,
+        },
+    )
+
+    assert update_response.status_code == 200
+    assert fake_client.announcements_updated == [
+        {
+            "course_ref": "101",
+            "topic_id": row["announcement_id"],
+            "title": f"Aviso corrigido - {course_name}",
+            "message_html": f"<p>Texto corrigido para {course_name}</p>",
+            "lock_comment": True,
+        }
+    ]
+    updated_job = job_manager.get_job(job["id"])
+    updated_row = updated_job["result"]["course_results"][0]
+    assert updated_row["announcement_edited"] is True
+    assert updated_row["announcement_title"] == f"Aviso corrigido - {course_name}"
+    assert updated_row["announcement_message_html"] == f"<p>Texto corrigido para {course_name}</p>"
 
 
 def test_announcement_job_handles_course_failure(app, monkeypatch):

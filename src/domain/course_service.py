@@ -3,6 +3,13 @@ from __future__ import annotations
 from src.utils.parsing import parse_course_references
 
 
+def short_course_code(course_code: str | None) -> str:
+    normalized = str(course_code or "").strip()
+    if not normalized:
+        return ""
+    return normalized.split("@", 1)[0].strip() or normalized
+
+
 class CourseService:
     def __init__(self, connection_service, group_repository, course_repository):
         self.connection_service = connection_service
@@ -69,6 +76,7 @@ class CourseService:
                             "id": course.get("id"),
                             "name": course.get("name"),
                             "course_code": course.get("course_code"),
+                            "course_code_short": short_course_code(course.get("course_code")),
                             "workflow_state": course.get("workflow_state"),
                             "term_name": (course.get("term") or {}).get("name"),
                             "messageable_context": bool(context),
@@ -118,6 +126,7 @@ class CourseService:
                     "course_ref": course_ref,
                     "name": course.get("name"),
                     "course_code": course.get("course_code"),
+                    "course_code_short": short_course_code(course.get("course_code")),
                     "term_name": (course.get("term") or {}).get("name"),
                     "workflow_state": course.get("workflow_state"),
                     "already_registered": course_ref in registered_refs,

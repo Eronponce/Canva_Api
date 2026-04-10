@@ -77,6 +77,21 @@
       </nav>
     </header>
 
+    <div id="environmentBanner" class="environment-banner environment-real" aria-live="polite">
+      <div>
+        <span>Ambiente atual</span>
+        <strong>REAL</strong>
+      </div>
+      <div>
+        <span>Base ativa</span>
+        <strong class="mono">carregando...</strong>
+      </div>
+      <div>
+        <span>Token</span>
+        <strong>carregando...</strong>
+      </div>
+    </div>
+
     <div id="globalNotice" class="notice hidden"></div>
 
     <main class="main-content">
@@ -91,11 +106,22 @@
               <span id="connectionStatusBadge" class="status-chip status-info">nao testado</span>
             </div>
 
+            <div class="environment-switch" aria-label="Selecionar ambiente do Canvas">
+              <button class="mode-button active" data-canvas-environment="real" type="button">
+                <strong>Ambiente real</strong>
+                <span>usa CANVAS_BASE_URL</span>
+              </button>
+              <button class="mode-button" data-canvas-environment="test" type="button">
+                <strong>Ambiente de teste</strong>
+                <span>usa CANVAS_BASE_URL_TEST</span>
+              </button>
+            </div>
+
             <div class="field-grid">
               <label class="field field-wide">
                 <span>Base URL</span>
                 <input id="baseUrl" type="text" placeholder="Opcional. Em branco usa a URL do .env">
-                <small class="field-help">Se voce nao preencher, o painel usa a `CANVAS_BASE_URL` configurada no `.env`.</small>
+                <small class="field-help">Se voce nao preencher, o painel usa a variavel `.env` do ambiente selecionado.</small>
               </label>
 
               <label class="field">
@@ -512,8 +538,9 @@
               </div>
 
               <div class="button-row">
+                <button id="startRecurrenceGuideBtn" class="btn btn-primary" type="button">Abrir fluxo guiado</button>
                 <button id="previewRecurrenceBtn" class="btn btn-secondary" type="button">Prever datas</button>
-                <button id="submitRecurrenceBtn" class="btn btn-primary" type="submit">Criar recorrencia</button>
+                <button id="submitRecurrenceBtn" class="btn btn-secondary" type="submit">Revisao final</button>
               </div>
             </form>
 
@@ -606,59 +633,42 @@
               </div>
 
               <div class="engagement-toolbar-secondary">
-                <label class="field">
-                  <span>Filtro da selecao</span>
-                  <select id="engagementCriteriaMode">
-                    <option value="never_accessed_or_incomplete_resources">Sem acesso nenhum ou com recursos pendentes</option>
-                    <option value="never_accessed">Somente sem acesso nenhum</option>
-                    <option value="incomplete_resources">Somente com recursos pendentes</option>
-                  </select>
-                </label>
-
-                <label class="field">
-                  <span>Combinar regras com</span>
-                  <select id="engagementMatchMode">
-                    <option value="or">OU</option>
-                    <option value="and">E</option>
-                  </select>
-                </label>
-
-                <div class="field-grid">
-                  <label class="field">
-                    <span>Sem atividade ha</span>
-                    <input id="engagementInactiveDays" type="number" min="0" placeholder="Ex.: 14">
-                    <small class="field-help">Usa `last_activity_at` dos enrollments.</small>
-                  </label>
-                  <label class="field">
-                    <span>Atividade total ate</span>
-                    <input id="engagementMaxActivityMinutes" type="number" min="0" placeholder="Minutos">
-                    <small class="field-help">Usa `total_activity_time` do Canvas.</small>
-                  </label>
+                <div class="field">
+                  <span>Filtros da selecao</span>
+                  <div class="switch-stack compact">
+                    <label class="switch-line">
+                      <input id="engagementCriterionNeverAccessed" class="switch-input" type="checkbox" checked>
+                      <span class="switch-track" aria-hidden="true"></span>
+                      <span class="switch-copy">Nunca entrou</span>
+                    </label>
+                    <label class="switch-line">
+                      <input id="engagementCriterionLowActivity" class="switch-input" type="checkbox" checked>
+                      <span class="switch-track" aria-hidden="true"></span>
+                      <span class="switch-copy">Menos que X minutos</span>
+                    </label>
+                    <label class="switch-line">
+                      <input id="engagementCriterionMissingQuiz" class="switch-input" type="checkbox">
+                      <span class="switch-track" aria-hidden="true"></span>
+                      <span class="switch-copy">Nao realizou a atividade objetiva</span>
+                    </label>
+                    <label class="switch-line">
+                      <input id="engagementCriterionMissingAssignment" class="switch-input" type="checkbox">
+                      <span class="switch-track" aria-hidden="true"></span>
+                      <span class="switch-copy">Nao realizou a atividade integradora</span>
+                    </label>
+                  </div>
                 </div>
 
-                <div class="switch-stack">
-                  <label class="switch-line">
-                    <input id="engagementOnlyModules" class="switch-input" type="checkbox">
-                    <span class="switch-track" aria-hidden="true"></span>
-                    <span class="switch-copy">Exigir cursos com requisitos de modulos</span>
-                  </label>
-                  <label class="switch-line">
-                    <input id="engagementRequireNeverAccessed" class="switch-input" type="checkbox">
-                    <span class="switch-track" aria-hidden="true"></span>
-                    <span class="switch-copy">Exigir sem acesso nenhum</span>
-                  </label>
-                  <label class="switch-line">
-                    <input id="engagementRequireIncomplete" class="switch-input" type="checkbox">
-                    <span class="switch-track" aria-hidden="true"></span>
-                    <span class="switch-copy">Exigir recursos pendentes</span>
-                  </label>
-                </div>
+                <label class="field" id="engagementMinutesField">
+                  <span>Minutos maximos na disciplina</span>
+                  <input id="engagementMaxActivityMinutes" type="number" min="1" step="1" value="10">
+                </label>
 
                 <div class="button-row">
-                  <button id="previewEngagementBtn" class="btn btn-secondary" type="button">Buscar quantidade por turma</button>
+                  <button id="previewEngagementBtn" class="btn btn-primary" type="button">Buscar inativos</button>
                 </div>
 
-                <p class="engagement-note">O criterio de recursos pendentes depende de requisitos de modulos configurados no Canvas.</p>
+                <p class="engagement-note">O relatorio separa dois comunicados: inatividade para quem nunca entrou ou tem poucos minutos, e pendencia para quem nao realizou a atividade objetiva ou a atividade integradora.</p>
               </div>
             </div>
           </article>
@@ -669,10 +679,41 @@
                 <h2>Resumo da selecao</h2>
                 <p>Resumo consolidado da busca antes da mensagem.</p>
               </div>
-              <button class="mini-btn ghost" type="button" data-card-toggle="engagementSummary" aria-expanded="true">Recolher</button>
+              <button class="card-toggle-hitbox" type="button" data-card-toggle="engagementSummary" aria-expanded="true">
+                <span class="card-toggle-copy">Recolher</span>
+                <span class="card-toggle-icon" aria-hidden="true"></span>
+              </button>
             </div>
             <div class="card-collapse-body" data-card-body="engagementSummary">
               <div id="engagementTargetSummary" class="summary-grid"></div>
+              <div class="card-collapse-footer">
+                <button class="card-toggle-hitbox card-toggle-hitbox-footer" type="button" data-card-toggle="engagementSummary" aria-expanded="true">
+                  <span class="card-toggle-copy">Recolher</span>
+                  <span class="card-toggle-icon" aria-hidden="true"></span>
+                </button>
+              </div>
+            </div>
+          </article>
+
+          <article class="card span-two" data-collapsible-card="engagementPreview">
+            <div class="card-header">
+              <div>
+                <h2>Relatorio de inativos</h2>
+                <p>Depois da busca, acompanhe os graficos, o consolidado sem duplicata e o detalhamento por turma e aluno.</p>
+              </div>
+              <button class="card-toggle-hitbox" type="button" data-card-toggle="engagementPreview" aria-expanded="true">
+                <span class="card-toggle-copy">Recolher</span>
+                <span class="card-toggle-icon" aria-hidden="true"></span>
+              </button>
+            </div>
+            <div class="card-collapse-body" data-card-body="engagementPreview">
+              <div id="engagementPreviewCard" class="job-output empty-state">Selecione as turmas e clique em buscar para ver quem entra no envio.</div>
+              <div class="card-collapse-footer">
+                <button class="card-toggle-hitbox card-toggle-hitbox-footer" type="button" data-card-toggle="engagementPreview" aria-expanded="true">
+                  <span class="card-toggle-copy">Recolher</span>
+                  <span class="card-toggle-icon" aria-hidden="true"></span>
+                </button>
+              </div>
             </div>
           </article>
 
@@ -680,21 +721,36 @@
             <div class="card-header">
               <div>
                 <h2>Mensagem</h2>
-                <p>Escreva a mensagem com variaveis seguras e valide a amostra antes do disparo.</p>
+                <p>Depois de analisar o relatorio, monte a mensagem final e revise a amostra antes do disparo.</p>
               </div>
-              <button class="mini-btn ghost" type="button" data-card-toggle="engagementMessage" aria-expanded="true">Recolher</button>
+              <button class="card-toggle-hitbox" type="button" data-card-toggle="engagementMessage" aria-expanded="true">
+                <span class="card-toggle-copy">Recolher</span>
+                <span class="card-toggle-icon" aria-hidden="true"></span>
+              </button>
             </div>
             <div class="card-collapse-body" data-card-body="engagementMessage">
               <form id="engagementForm" class="stack-form">
                 <label class="field">
-                  <span>Assunto</span>
+                  <span>Assunto da inatividade</span>
                   <input id="engagementSubject" data-template-scope="engagement" type="text" placeholder="Acompanhamento de acesso ao curso">
                 </label>
 
                 <label class="field">
-                  <span>Mensagem</span>
+                  <span>Mensagem da inatividade</span>
                   {% raw %}
-                  <textarea id="engagementMessage" data-template-scope="engagement" rows="12" placeholder="Ola {{student_name}},&#10;&#10;Percebemos que voce ainda nao se movimentou como esperado em {{course_name}}."></textarea>
+                  <textarea id="engagementMessage" data-template-scope="engagement" rows="8" placeholder="Ola {{student_name}},&#10;&#10;Percebemos {{reason}} em {{course_name}}."></textarea>
+                  {% endraw %}
+                </label>
+
+                <label class="field">
+                  <span>Assunto de atividade objetiva/integradora</span>
+                  <input id="engagementActivitySubject" data-template-scope="engagement" type="text" placeholder="Atividade pendente no curso">
+                </label>
+
+                <label class="field">
+                  <span>Mensagem de atividade objetiva/integradora</span>
+                  {% raw %}
+                  <textarea id="engagementActivityMessage" data-template-scope="engagement" rows="8" placeholder="Ola {{student_name}},&#10;&#10;Identificamos que ficou pendente em {{course_name}}: {{missing_activities}}."></textarea>
                   {% endraw %}
                 </label>
 
@@ -713,22 +769,15 @@
                 </div>
 
                 <div class="button-row">
-                  <button class="btn btn-primary" type="submit">Enviar para os alunos encontrados</button>
+                  <button class="btn btn-primary" type="submit">Abrir revisao final</button>
                 </div>
               </form>
-            </div>
-          </article>
-
-          <article class="card span-two" data-collapsible-card="engagementPreview">
-            <div class="card-header">
-              <div>
-                <h2>Quem vai receber</h2>
-                <p>Veja turmas e alunos encontrados, ja ordenados por prioridade de acao.</p>
+              <div class="card-collapse-footer">
+                <button class="card-toggle-hitbox card-toggle-hitbox-footer" type="button" data-card-toggle="engagementMessage" aria-expanded="true">
+                  <span class="card-toggle-copy">Recolher</span>
+                  <span class="card-toggle-icon" aria-hidden="true"></span>
+                </button>
               </div>
-              <button class="mini-btn ghost" type="button" data-card-toggle="engagementPreview" aria-expanded="true">Recolher</button>
-            </div>
-            <div class="card-collapse-body" data-card-body="engagementPreview">
-              <div id="engagementPreviewCard" class="job-output empty-state">Selecione as turmas e clique em buscar para ver quem entra no envio.</div>
             </div>
           </article>
 
@@ -738,10 +787,19 @@
                 <h2>Resultado do envio</h2>
                 <p>Acompanhe o lote e baixe o CSV consolidado por turma.</p>
               </div>
-              <button class="mini-btn ghost" type="button" data-card-toggle="engagementResult" aria-expanded="true">Recolher</button>
+              <button class="card-toggle-hitbox" type="button" data-card-toggle="engagementResult" aria-expanded="true">
+                <span class="card-toggle-copy">Recolher</span>
+                <span class="card-toggle-icon" aria-hidden="true"></span>
+              </button>
             </div>
             <div class="card-collapse-body" data-card-body="engagementResult">
               <div id="engagementJobCard" class="job-output empty-state">Nenhum lote de alunos inativos iniciado.</div>
+              <div class="card-collapse-footer">
+                <button class="card-toggle-hitbox card-toggle-hitbox-footer" type="button" data-card-toggle="engagementResult" aria-expanded="true">
+                  <span class="card-toggle-copy">Recolher</span>
+                  <span class="card-toggle-icon" aria-hidden="true"></span>
+                </button>
+              </div>
             </div>
           </article>
         </div>
@@ -800,9 +858,12 @@
               <code>GET /api/v1/courses</code>
               <code>GET /api/v1/courses/:course_id</code>
               <code>GET /api/v1/courses/:course_id/users?enrollment_type[]=student</code>
-              <code>GET /api/v1/courses/:course_id/enrollments?type[]=StudentEnrollment</code>
               <code>GET /api/v1/courses/:course_id/analytics/student_summaries</code>
-              <code>GET /api/v1/courses/:course_id/bulk_user_progress</code>
+              <code>GET /api/v1/courses/:course_id/enrollments?type[]=StudentEnrollment</code>
+              <code>GET /api/v1/courses/:course_id/assignments</code>
+              <code>GET /api/v1/courses/:course_id/quizzes</code>
+              <code>GET /api/v1/courses/:course_id/assignments/:assignment_id/submissions</code>
+              <code>GET /api/v1/courses/:course_id/quizzes/:quiz_id/submissions</code>
               <code>POST /api/v1/courses/:course_id/discussion_topics</code>
               <code>DELETE /api/v1/courses/:course_id/discussion_topics/:topic_id</code>
               <code>GET /api/v1/search/recipients</code>
@@ -1129,6 +1190,29 @@
     </div>
   </div>
 
+  <div id="guidedFlowModal" class="modal hidden" aria-hidden="true">
+    <div class="modal-backdrop"></div>
+    <div class="modal-dialog modal-wide">
+      <div class="card-header">
+        <div>
+          <h2 id="guidedFlowTitle">Fluxo guiado</h2>
+          <p id="guidedFlowSubtitle">Avance uma etapa por vez, validando antes de executar.</p>
+        </div>
+        <button id="guidedFlowCancelBtn" class="mini-btn ghost" type="button">Fechar</button>
+      </div>
+
+      <div id="guidedFlowNotice" class="notice hidden"></div>
+      <div id="guidedFlowProgress" class="wizard-progress"></div>
+      <div id="guidedFlowBody" class="guided-flow-body"></div>
+
+      <div class="button-row guided-flow-actions">
+        <button id="guidedFlowBackBtn" class="btn btn-secondary" type="button">Voltar</button>
+        <button id="guidedFlowEditBtn" class="btn btn-secondary hidden" type="button">Corrigir na tela</button>
+        <button id="guidedFlowNextBtn" class="btn btn-primary" type="button">Continuar</button>
+      </div>
+    </div>
+  </div>
+
   <div id="recurrenceCancelModal" class="modal hidden" aria-hidden="true">
     <div class="modal-backdrop" data-action="close-recurrence-cancel-modal"></div>
     <div class="modal-dialog">
@@ -1159,6 +1243,50 @@
         <button id="confirmRecurrenceCancelBtn" class="btn btn-danger" type="button">Cancelar avisos futuros</button>
         <button id="cancelRecurrenceCancelBtn" class="btn btn-secondary" type="button">Voltar</button>
       </div>
+    </div>
+  </div>
+
+  <div id="announcementEditModal" class="modal hidden" aria-hidden="true">
+    <div class="modal-backdrop" data-action="close-announcement-edit-modal"></div>
+    <div class="modal-dialog modal-wide">
+      <div class="card-header">
+        <div>
+          <h2 id="announcementEditModalTitle">Editar comunicado enviado</h2>
+          <p id="announcementEditModalSubtitle">Corrija o aviso ja criado no Canvas para a turma selecionada.</p>
+        </div>
+        <button id="closeAnnouncementEditModalBtn" class="mini-btn ghost" type="button">Fechar</button>
+      </div>
+
+      <div id="announcementEditNotice" class="notice hidden"></div>
+      <div id="announcementEditTargetSummary" class="summary-grid"></div>
+
+      <form id="announcementEditForm" class="stack-form spaced-top">
+        <div id="announcementEditSingleFields" class="stack-form">
+          <label class="field">
+            <span>Titulo corrigido</span>
+            <input id="announcementEditTitle" type="text" placeholder="Titulo final do comunicado">
+          </label>
+
+          <label class="field">
+            <span>Mensagem HTML corrigida</span>
+            <textarea id="announcementEditMessage" rows="12" placeholder="<p>Mensagem corrigida...</p>"></textarea>
+            <small class="field-help">A edicao atualiza o comunicado existente no Canvas. Anexos antigos continuam como estavam.</small>
+          </label>
+
+          <label class="switch-line">
+            <input id="announcementEditLockComment" class="switch-input" type="checkbox">
+            <span class="switch-track" aria-hidden="true"></span>
+            <span class="switch-copy">Bloquear comentarios</span>
+          </label>
+        </div>
+
+        <div id="announcementBatchEditList" class="announcement-batch-list hidden"></div>
+
+        <div class="button-row">
+          <button id="saveAnnouncementEditBtn" class="btn btn-primary" type="submit">Salvar no Canvas</button>
+          <button id="cancelAnnouncementEditBtn" class="btn btn-secondary" type="button">Cancelar</button>
+        </div>
+      </form>
     </div>
   </div>
 </body>

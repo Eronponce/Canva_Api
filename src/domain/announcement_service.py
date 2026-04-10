@@ -11,10 +11,11 @@ from src.utils.time_utils import parse_schedule_datetime, utc_now_iso
 
 
 class AnnouncementService:
-    def __init__(self, app_config, connection_service, job_manager):
+    def __init__(self, app_config, connection_service, job_manager, job_repository):
         self.app_config = app_config
         self.connection_service = connection_service
         self.job_manager = job_manager
+        self.job_repository = job_repository
 
     def run_job(self, job_id: str, payload: dict) -> None:
         course_refs = parse_course_references(payload.get("course_ids_text", ""))
@@ -113,7 +114,11 @@ class AnnouncementService:
                         "course_ref": course_ref,
                         "course_id": course.get("id"),
                         "course_name": course.get("name"),
+                        "course_code": course.get("course_code"),
                         "status": "success",
+                        "title": rendered_title,
+                        "message_html": rendered_message_html,
+                        "lock_comment": lock_comment,
                         "announcement_id": None,
                         "announcement_url": None,
                         "published": published,
@@ -297,6 +302,136 @@ class AnnouncementService:
             "courses": courses,
         }
 
+    def get_edit_target(self, job_id: str, *, course_ref: str, announcement_id: int | str) -> dict:
+        target = self._editable_target(job_id, course_ref=course_ref, announcement_id=announcement_id)
+        title, message_html, lock_comment = self._resolved_edit_content(target)
+        return {
+            "job_id": target["job_id"],
+            "course_ref": target["course_ref"],
+            "course_id": target["canvas_course_id"] or target["course_id"],
+            "course_name": target["course_name"],
+            "announcement_id": target["announcement_id"],
+            "announcement_url": target["announcement_url"],
+            "base_url": target["base_url"],
+            "published": target["published"],
+            "delayed_post_at": target["delayed_post_at"],
+            "title": title,
+            "message_html": message_html,
+            "lock_comment": lock_comment,
+        }
+
+    def update_history_announcement(self, job_id: str, *, announcement_id: int | str, payload: dict) -> dict:
+        course_ref = str(payload.get("course_ref") or "").strip()
+        title = str(payload.get("title") or "").strip()
+        message_html = str(payload.get("message_html") or "").strip()
+        lock_comment = bool(payload.get("lock_comment"))
+
+        if not course_ref:
+            raise ValueError("Nao foi possivel identificar a turma do comunicado.")
+        if not title:
+            raise ValueError("Informe o titulo corrigido do comunicado.")
+        if not message_html:
+            raise ValueError("Informe a mensagem corrigida do comunicado.")
+
+        target = self._editable_target(job_id, course_ref=course_ref, announcement_id=announcement_id)
+        rendered_title = self._render_template(
+            title,
+            course_name=target["course_name"],
+            course_ref=target["course_ref"],
+            course_code=(target["raw_result"] or {}).get("course_code"),
+        )
+        rendered_message_html = self._render_template(
+            message_html,
+            course_name=target["course_name"],
+            course_ref=target["course_ref"],
+            course_code=(target["raw_result"] or {}).get("course_code"),
+        )
+
+        client_payload = dict(payload)
+        if not str(client_payload.get("base_url") or "").strip() and target.get("base_url"):
+            client_payload["base_url"] = target["base_url"]
+        client = self.connection_service.build_client(client_payload)
+        canvas_course_ref = str(target["canvas_course_id"] or target["course_ref"])
+        response = client.update_announcement(
+            course_ref=canvas_course_ref,
+            topic_id=target["announcement_id"],
+            title=rendered_title,
+            message_html=rendered_message_html,
+            lock_comment=lock_comment,
+        )
+        if not isinstance(response, dict):
+            response = {}
+
+        updated_result = self.job_repository.record_announcement_edit(
+            job_public_id=job_id,
+            course_ref=target["course_ref"],
+            announcement_id=target["announcement_id"],
+            title=rendered_title,
+            message_html=rendered_message_html,
+            lock_comment=lock_comment,
+            canvas_response=response,
+        )
+        self.job_manager.add_log(
+            job_id,
+            level="info",
+            message="Comunicado editado no Canvas a partir do relatorio.",
+            data={
+                "course_ref": target["course_ref"],
+                "course_id": target["canvas_course_id"] or target["course_id"],
+                "announcement_id": target["announcement_id"],
+            },
+        )
+
+        return {
+            "ok": True,
+            "message": "Comunicado atualizado no Canvas.",
+            "target": self.get_edit_target(job_id, course_ref=target["course_ref"], announcement_id=target["announcement_id"]),
+            "course_result": updated_result,
+        }
+
+    def _editable_target(self, job_id: str, *, course_ref: str, announcement_id: int | str) -> dict:
+        target = self.job_repository.get_announcement_edit_target(
+            job_public_id=job_id,
+            course_ref=course_ref,
+            announcement_id=announcement_id,
+        )
+        if not target:
+            raise ValueError("Comunicado nao encontrado no historico do painel.")
+        if target["job_kind"] != "announcement":
+            raise ValueError("Somente lotes de comunicados podem ser editados por aqui.")
+        if target["row_status"] != "success":
+            raise ValueError("Somente comunicados criados com sucesso podem ser editados.")
+        if target["dry_run"]:
+            raise ValueError("Este registro veio de modo teste e nao criou comunicado real no Canvas.")
+        if not target["announcement_id"]:
+            raise ValueError("Este resultado nao tem ID de comunicado do Canvas para editar.")
+        return target
+
+    def _resolved_edit_content(self, target: dict) -> tuple[str, str, bool]:
+        raw_result = target.get("raw_result") or {}
+        request_payload = target.get("request_payload") or {}
+        title = raw_result.get("title") or request_payload.get("title") or target.get("job_title") or ""
+        message_html = raw_result.get("message_html") or request_payload.get("message_html") or ""
+        lock_comment = raw_result.get("lock_comment")
+        if lock_comment is None:
+            lock_comment = bool(request_payload.get("lock_comment"))
+
+        return (
+            self._render_template(
+                title,
+                course_name=target.get("course_name"),
+                course_ref=target.get("course_ref"),
+                course_code=raw_result.get("course_code"),
+            ),
+            self._render_template(
+                message_html,
+                course_name=target.get("course_name"),
+                course_ref=target.get("course_ref"),
+                course_code=raw_result.get("course_code"),
+            ),
+            bool(lock_comment),
+        )
+
     def _write_report(self, job_id: str, rows: list[dict]) -> str:
         report_filename = f"announcement-report-{job_id}.csv"
         report_path = Path(self.app_config.reports_dir) / report_filename
@@ -304,7 +439,11 @@ class AnnouncementService:
             "course_ref",
             "course_id",
             "course_name",
+            "course_code",
             "status",
+            "title",
+            "message_html",
+            "lock_comment",
             "announcement_id",
             "announcement_url",
             "published",
@@ -315,7 +454,7 @@ class AnnouncementService:
         ]
 
         with report_path.open("w", encoding="utf-8-sig", newline="") as csv_file:
-            writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
+            writer = csv.DictWriter(csv_file, fieldnames=fieldnames, extrasaction="ignore")
             writer.writeheader()
             writer.writerows(rows)
 
