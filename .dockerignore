@@ -2,6 +2,8 @@
 .gitignore
 .agents
 .pytest_cache
+.pytest-tmp
+pytest-of-*
 .venv
 venv
 __pycache__

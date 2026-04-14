@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## v1.3.2 - 2026-04-14
+
+### Docker
+
+- corrigido o `.dockerignore` para excluir pastas temporarias de teste que bloqueavam o `docker compose build` no Windows
+
 ## v1.3.1 - 2026-04-14
 
 ### Robustez de envio
