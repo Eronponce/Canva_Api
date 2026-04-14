@@ -85,16 +85,37 @@ class CanvasClient:
         request_callable = self.session.request if use_auth else requests.request
 
         for attempt in range(1, self.retry_max_attempts + 1):
-            response = request_callable(
-                method=method,
-                url=url,
-                params=params,
-                data=data,
-                files=files,
-                headers=headers,
-                timeout=self.timeout,
-                allow_redirects=allow_redirects,
-            )
+            try:
+                response = request_callable(
+                    method=method,
+                    url=url,
+                    params=params,
+                    data=data,
+                    files=files,
+                    headers=headers,
+                    timeout=self.timeout,
+                    allow_redirects=allow_redirects,
+                )
+            except requests.exceptions.RequestException as exc:
+                should_retry = self._is_retryable_request_exception(exc)
+                if should_retry and attempt < self.retry_max_attempts:
+                    delay = self.retry_base_delay * (2 ** (attempt - 1))
+                    self._rewind_request_files(files)
+                    LOGGER.warning(
+                        "Canvas request retrying after network error | error=%s attempt=%s/%s delay=%.2fs url=%s",
+                        exc.__class__.__name__,
+                        attempt,
+                        self.retry_max_attempts,
+                        delay,
+                        url,
+                    )
+                    time.sleep(delay)
+                    continue
+
+                raise CanvasApiError(
+                    message=f"Falha de rede ao acessar {method.upper()} {url}: {exc}",
+                    details=str(exc),
+                ) from exc
 
             if response.status_code in expected_status:
                 return self._extract_json_or_text(response), response
@@ -103,6 +124,7 @@ class CanvasClient:
             if should_retry and attempt < self.retry_max_attempts:
                 retry_after = response.headers.get("Retry-After")
                 delay = float(retry_after) if retry_after else self.retry_base_delay * (2 ** (attempt - 1))
+                self._rewind_request_files(files)
                 LOGGER.warning(
                     "Canvas request retrying | status=%s attempt=%s/%s delay=%.2fs url=%s",
                     response.status_code,
@@ -122,6 +144,37 @@ class CanvasClient:
             )
 
         raise CanvasApiError(message=f"Falha inesperada ao acessar {url}.")
+
+    @staticmethod
+    def _is_retryable_request_exception(exc: Exception) -> bool:
+        return isinstance(
+            exc,
+            (
+                requests.exceptions.Timeout,
+                requests.exceptions.ConnectionError,
+            ),
+        )
+
+    @staticmethod
+    def _rewind_request_files(files) -> None:
+        if not files:
+            return
+        iterable = files.values() if isinstance(files, dict) else files
+        for item in iterable:
+            candidate = None
+            if isinstance(item, tuple):
+                for part in item:
+                    if hasattr(part, "seek") and hasattr(part, "read"):
+                        candidate = part
+                        break
+            elif hasattr(item, "seek") and hasattr(item, "read"):
+                candidate = item
+            if candidate is None:
+                continue
+            try:
+                candidate.seek(0)
+            except Exception:  # noqa: BLE001
+                continue
 
     def _iter_paginated(self, path: str, *, params=None) -> list[dict]:
         current_url = self._build_url(path)

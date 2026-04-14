@@ -205,6 +205,7 @@ O uso comum fica concentrado nos filtros escolhidos e no relatorio salvo da busc
 - cada busca de `Inativos` feita pela interface cria uma `Previa de inativos` na aba `Relatorios`, com CSV consolidado por aluno para conferencia manual antes do envio
 - o proprio card de preview em `Inativos` mostra `Baixar CSV da previa` e `Abrir previa em Relatorios` logo apos a busca
 - a aba `Relatorios` permite reabrir a analise de `Inativos` na propria tela de `Inativos`, mantendo os graficos e o consolidado acessiveis
+- falhas transitorias de rede do Canvas, como `Read timed out` e quedas de conexao, agora usam retry automatico com backoff conforme `CANVAS_RETRY_MAX_ATTEMPTS` e `CANVAS_RETRY_BASE_DELAY`
 
 ### Como ler os indicadores
 

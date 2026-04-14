@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## v1.3.1 - 2026-04-14
+
+### Robustez de envio
+
+- timeouts e erros transitorios de rede do Canvas agora tambem entram no retry automatico do cliente HTTP
+- retries com upload reaproveitam o arquivo corretamente entre tentativas para evitar falha por ponteiro consumido
+
 ## v1.3.0 - 2026-04-10
 
 ### Conexao

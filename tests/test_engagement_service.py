@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import io
+
+import requests
+
 from src.domain.engagement_service import EngagementService
 from src.services.canvas_client import CanvasClient
 
@@ -411,6 +415,81 @@ def test_canvas_client_requests_quiz_submissions_with_associated_submission(monk
     assert captured["path"] == "/api/v1/courses/101/quizzes/79410/submissions"
     assert captured["key"] == "quiz_submissions"
     assert ("include[]", "submission") in captured["params"]
+
+
+def test_canvas_client_retries_on_transient_read_timeout(monkeypatch):
+    client = CanvasClient(
+        base_url="https://canvas.example.com",
+        access_token="token",
+        timeout=5,
+        retry_max_attempts=3,
+        retry_base_delay=0,
+    )
+    attempts = {"count": 0}
+
+    class FakeResponse:
+        status_code = 200
+        headers = {"Content-Type": "application/json"}
+
+        @staticmethod
+        def json():
+            return {"ok": True}
+
+    def fake_request(**kwargs):
+        attempts["count"] += 1
+        if attempts["count"] == 1:
+            raise requests.exceptions.ReadTimeout("read timed out")
+        return FakeResponse()
+
+    monkeypatch.setattr(client.session, "request", fake_request)
+
+    payload, _response = client._request("POST", "/api/v1/conversations", data=[("subject", "Teste")], expected_status=(200,))
+
+    assert attempts["count"] == 2
+    assert payload == {"ok": True}
+
+
+def test_canvas_client_rewinds_files_before_retry(monkeypatch):
+    client = CanvasClient(
+        base_url="https://canvas.example.com",
+        access_token="token",
+        timeout=5,
+        retry_max_attempts=2,
+        retry_base_delay=0,
+    )
+    file_handle = io.BytesIO(b"arquivo de teste")
+    attempts = {"count": 0}
+    observed_positions = []
+
+    class FakeResponse:
+        status_code = 200
+        headers = {"Content-Type": "application/json"}
+
+        @staticmethod
+        def json():
+            return {"ok": True}
+
+    def fake_request(**kwargs):
+        attempts["count"] += 1
+        upload_file = kwargs["files"]["file"][1]
+        observed_positions.append(upload_file.tell())
+        if attempts["count"] == 1:
+            upload_file.read()
+            raise requests.exceptions.ReadTimeout("read timed out")
+        return FakeResponse()
+
+    monkeypatch.setattr(client.session, "request", fake_request)
+
+    payload, _response = client._request(
+        "POST",
+        "/api/v1/users/self/files",
+        files={"file": ("teste.txt", file_handle, "text/plain")},
+        expected_status=(200,),
+    )
+
+    assert attempts["count"] == 2
+    assert observed_positions == [0, 0]
+    assert payload == {"ok": True}
 
 
 def test_assignment_submission_done_accepts_ungraded_turn_in_content():

@@ -636,6 +636,7 @@ Esperado no painel:
 - atividade enviada sem nota ainda nao entra como pendente se o Canvas ja marcar submissao ou retornar conteudo enviado
 - atividades objetivas de treino ou pesquisa nao avaliativa nao entram como `Nao realizou a atividade objetiva`
 - se uma disciplina nao tiver atividade objetiva ou atividade integradora publicada para o filtro, o preview mostra aviso claro e nao envia para alunos daquele tipo de comunicado
+- se o Canvas devolver timeout ou queda transitoria de conexao no envio, o painel tenta novamente automaticamente antes de marcar falha
 
 ### 7.3 Variaveis seguras
 
