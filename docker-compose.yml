@@ -1,3 +1,9 @@
+x-idle-shutdown-env: &idle-shutdown-env
+  PANEL_IDLE_SHUTDOWN_ENABLED: "true"
+  PANEL_IDLE_TIMEOUT_SECONDS: "10800"
+  PANEL_IDLE_CHECK_INTERVAL_SECONDS: "60"
+  PANEL_IDLE_ACTIVITY_FILE: "/tmp/canvas-bulk-panel.last-activity"
+
 services:
   panel:
     build:
@@ -5,8 +11,9 @@ services:
       dockerfile: Dockerfile
     container_name: canvas-bulk-panel
     init: true
-    restart: unless-stopped
+    restart: on-failure
     environment:
+      <<: *idle-shutdown-env
       FLASK_HOST: 0.0.0.0
       FLASK_PORT: "5000"
       PYTHONUNBUFFERED: "1"
@@ -21,7 +28,7 @@ services:
         - CMD
         - python
         - -c
-        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5000/', timeout=5)"
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5000/healthz', timeout=5)"
       interval: 30s
       timeout: 5s
       retries: 5

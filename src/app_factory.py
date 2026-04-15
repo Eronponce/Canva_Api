@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from flask import Flask
+from flask import Flask, request
 
 from src.config import AppConfig
 from src.database import AnnouncementRecurrenceRepository, Base, CourseRepository, DatabaseAdminRepository, DatabaseManager, GroupRepository, JobRepository, ReportRepository
@@ -14,6 +14,7 @@ from src.domain.env_service import EnvService
 from src.domain.message_service import MessageService
 from src.jobs.job_manager import JobManager
 from src.logging_setup import configure_logging
+from src.utils.activity_tracker import ActivityTracker
 from src.web.routes import register_error_handlers, web
 
 
@@ -72,6 +73,18 @@ def create_app() -> Flask:
         "message_service": message_service,
         "engagement_service": engagement_service,
     }
+
+    if app_config.panel_idle_shutdown_enabled:
+        tracker = ActivityTracker(app_config.panel_idle_activity_file)
+        tracker.touch()
+        app.extensions["activity_tracker"] = tracker
+
+        @app.before_request
+        def refresh_runtime_activity_marker():  # noqa: ANN202
+            if request.path == "/healthz":
+                return None
+            tracker.touch()
+            return None
 
     app.register_blueprint(web)
     register_error_handlers(app)

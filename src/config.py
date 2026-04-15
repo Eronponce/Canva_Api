@@ -87,6 +87,10 @@ class AppConfig:
     test_access_token: str = ""
     test_token_source: str = "none"
     default_canvas_environment: str = "real"
+    panel_idle_shutdown_enabled: bool = False
+    panel_idle_timeout_seconds: int = 10800
+    panel_idle_check_interval_seconds: int = 60
+    panel_idle_activity_file: Path = Path("/tmp/canvas-bulk-panel.last-activity")
 
     @classmethod
     def from_env(cls) -> "AppConfig":
@@ -137,6 +141,10 @@ class AppConfig:
             test_access_token=test_access_token,
             test_token_source=test_token_source,
             default_canvas_environment=_normalize_canvas_environment(_resolve_env_value("CANVAS_ENVIRONMENT", env_values)),
+            panel_idle_shutdown_enabled=_env_bool("PANEL_IDLE_SHUTDOWN_ENABLED", False),
+            panel_idle_timeout_seconds=int(_first_non_empty(_resolve_env_value("PANEL_IDLE_TIMEOUT_SECONDS", env_values), "10800")),
+            panel_idle_check_interval_seconds=int(_first_non_empty(_resolve_env_value("PANEL_IDLE_CHECK_INTERVAL_SECONDS", env_values), "60")),
+            panel_idle_activity_file=Path(_first_non_empty(_resolve_env_value("PANEL_IDLE_ACTIVITY_FILE", env_values), "/tmp/canvas-bulk-panel.last-activity")),
             code_root=packaged_root,
             runtime_root=runtime_root,
             templates_dir=packaged_root / "templates",
@@ -189,6 +197,10 @@ class AppConfig:
         self.test_access_token = test_access_token
         self.test_token_source = test_token_source
         self.default_canvas_environment = _normalize_canvas_environment(_resolve_env_value("CANVAS_ENVIRONMENT", env_values))
+        self.panel_idle_shutdown_enabled = _env_bool("PANEL_IDLE_SHUTDOWN_ENABLED", self.panel_idle_shutdown_enabled)
+        self.panel_idle_timeout_seconds = int(_first_non_empty(_resolve_env_value("PANEL_IDLE_TIMEOUT_SECONDS", env_values), str(self.panel_idle_timeout_seconds)))
+        self.panel_idle_check_interval_seconds = int(_first_non_empty(_resolve_env_value("PANEL_IDLE_CHECK_INTERVAL_SECONDS", env_values), str(self.panel_idle_check_interval_seconds)))
+        self.panel_idle_activity_file = Path(_first_non_empty(_resolve_env_value("PANEL_IDLE_ACTIVITY_FILE", env_values), str(self.panel_idle_activity_file)))
 
         self.request_timeout = int(_first_non_empty(_resolve_env_value("CANVAS_REQUEST_TIMEOUT", env_values), str(self.request_timeout)))
         self.retry_max_attempts = int(_first_non_empty(_resolve_env_value("CANVAS_RETRY_MAX_ATTEMPTS", env_values), str(self.retry_max_attempts)))
@@ -217,6 +229,10 @@ class AppConfig:
             "request_timeout": self.request_timeout,
             "retry_max_attempts": self.retry_max_attempts,
             "retry_base_delay": self.retry_base_delay,
+            "panel_idle_shutdown_enabled": self.panel_idle_shutdown_enabled,
+            "panel_idle_timeout_seconds": self.panel_idle_timeout_seconds,
+            "panel_idle_check_interval_seconds": self.panel_idle_check_interval_seconds,
+            "panel_idle_activity_file": str(self.panel_idle_activity_file),
             "history_limit": self.history_limit,
             "legacy_json_import_enabled": self.legacy_json_import_enabled,
             "env_file_path": str(self.env_file),

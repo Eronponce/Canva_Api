@@ -67,6 +67,20 @@ Esperado no sistema:
 - o servidor responde em `http://127.0.0.1:5000`
 - o launcher permite `iniciar`, `parar`, `reiniciar` e `status`
 
+### 1.3 Idle shutdown no Docker
+
+Passos:
+
+1. Suba o painel com `docker compose up -d --build`.
+2. Confirme que o healthcheck ficou saudavel.
+3. Deixe o painel sem uso real por mais de `3 horas`, ou reduza temporariamente o timeout para teste local.
+
+Esperado no sistema:
+
+- o healthcheck usa `/healthz` e nao renova a atividade
+- o container encerra sozinho quando atinge o limite de ociosidade
+- o operador consegue religar com `docker compose up -d`
+
 ### 1.2 Estado inicial limpo
 
 Passos:

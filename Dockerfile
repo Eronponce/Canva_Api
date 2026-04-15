@@ -13,6 +13,9 @@ RUN python -m pip install --upgrade pip \
 
 COPY . .
 
+RUN chmod +x /app/docker/entrypoint.sh
+
 EXPOSE 5000
 
+ENTRYPOINT ["/app/docker/entrypoint.sh"]
 CMD ["python", "app.py"]

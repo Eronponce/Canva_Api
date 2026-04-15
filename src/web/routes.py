@@ -71,6 +71,11 @@ def index():
     return render_template("index.html")
 
 
+@web.get("/healthz")
+def healthz():
+    return jsonify({"status": "ok"})
+
+
 @web.get("/api/config")
 def get_config():
     app_config = current_app.config["APP_CONFIG"]

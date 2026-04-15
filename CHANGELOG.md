@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Docker
+
+- adicionada politica de idle shutdown no container do painel para encerrar automaticamente depois de 3 horas sem uso real
+- healthcheck do Docker agora usa `/healthz`, que nao renova o marcador de atividade
+- documentacao operacional do Docker foi registrada em `docker/README.md` para orientar os proximos operadores
+
 ## v1.3.2 - 2026-04-14
 
 ### Docker

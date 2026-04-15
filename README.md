@@ -372,6 +372,7 @@ O repositorio agora inclui `Dockerfile` e `docker-compose.yml` para subir o pain
 - `.env` editavel pelo proprio painel
 - `data/` persistente para SQLite, JSONs e CSVs
 - `logs/` persistente para diagnostico local
+- desligamento automatico do container depois de `3 horas` sem uso real do operador
 
 No WSL Debian, entre na pasta montada:
 
@@ -387,6 +388,13 @@ Para acompanhar:
 docker compose ps
 docker compose logs -f panel
 ```
+
+Politica de ociosidade no Docker:
+
+- o service `panel` encerra sozinho depois de `3 horas` sem uso
+- o healthcheck de Docker nao conta como atividade
+- para religar depois, use `docker compose up -d`
+- detalhes operacionais ficam em [docker/README.md](/C:/Eron_Lab/Canva_Api/docker/README.md)
 
 ### Para testes automatizados
 
@@ -457,6 +465,7 @@ Persistencia e configuracao no modo Docker:
 - `./data` fica montado em `/app/data`
 - `./logs` fica montado em `/app/logs`
 - o `docker-compose.yml` ja publica a porta `5000` e sobrescreve `FLASK_HOST` para `0.0.0.0`
+- o container usa idle shutdown por `3 horas` com `restart: on-failure`, para nao voltar sozinho apos uma parada limpa por ociosidade
 
 ### Com os atalhos locais
 
